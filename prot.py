@@ -240,7 +240,7 @@ class Cuppini2017(Integrator):
         self,
         *,
         neurons=180,
-        tau=(3, 15, 1),            # (mode_1, mode_2, multisensory)
+        tau=(3, 15, 1),            # (mode0, mode1, multisensory)
         s=0.3,
         theta=20,
         mode0="auditory",
@@ -265,7 +265,7 @@ class Cuppini2017(Integrator):
         if len(tau) != 3:
             raise ValueError(
                 "tau must have exactly 3 values: "
-                "(mode_1, mode_2, multisensory)"
+                "(mode0, mode1, multisensory)"
             )
 
         self.neurons = neurons
@@ -281,11 +281,11 @@ class Cuppini2017(Integrator):
         # Default Mexican Hat values, one per layer, identical to those
         # hardcoded in the original monolithic run().
         self.lateral_params = lateral_params or {
-            "mode_1": dict(
+            "mode0": dict(
                 excitation_loc=5, inhibition_loc=4,
                 excitation_scale=3, inhibition_scale=120,
             ),
-            "mode_2": dict(
+            "mode1": dict(
                 excitation_loc=5, inhibition_loc=4,
                 excitation_scale=3, inhibition_scale=120,
             ),
@@ -316,48 +316,48 @@ class Cuppini2017(Integrator):
     def get_synaps_config(self):
 
         # --- Lateral connectivity (Mexican Hat), within each layer ---
-        mode_1_latsynapses = self.calculate_lateral_synapses(
-            neurons=self.neurons, **self.lateral_params["mode_1"]
+        mode0_latsynapses = self.calculate_lateral_synapses(
+            neurons=self.neurons, **self.lateral_params["mode0"]
         )
-        mode_2_latsynapses = self.calculate_lateral_synapses(
-            neurons=self.neurons, **self.lateral_params["mode_2"]
+        mode1_latsynapses = self.calculate_lateral_synapses(
+            neurons=self.neurons, **self.lateral_params["mode1"]
         )
         multi_latsynapses = self.calculate_lateral_synapses(
             neurons=self.neurons, **self.lateral_params["multi"]
         )
 
         # --- Cross-modal synapses (Wav, Wva) ---
-        mode_1_to_mode_2_synapses = self.calculate_inter_areal_synapses(
+        mode0_to_mode1_synapses = self.calculate_inter_areal_synapses(
             neurons=self.neurons,
             weight=self.cross_modal_weight,
             sigma=self.cross_modal_sigma,
         )
-        mode_2_to_mode_1_synapses = self.calculate_inter_areal_synapses(
+        mode1_to_mode0_synapses = self.calculate_inter_areal_synapses(
             neurons=self.neurons,
             weight=self.cross_modal_weight,
             sigma=self.cross_modal_sigma,
         )
 
         # --- Feedforward synapses to the multisensory layer (Wma, Wmv) ---
-        mode_1_to_multi_synapses = self.calculate_inter_areal_synapses(
+        mode0_to_multi_synapses = self.calculate_inter_areal_synapses(
             neurons=self.neurons,
             weight=self.feedforward_weight,
             sigma=self.feedforward_sigma,
         )
-        mode_2_to_multi_synapses = self.calculate_inter_areal_synapses(
+        mode1_to_multi_synapses = self.calculate_inter_areal_synapses(
             neurons=self.neurons,
             weight=self.feedforward_weight,
             sigma=self.feedforward_sigma,
         )
 
         return {
-            "mode_1_latsynapses": mode_1_latsynapses,
-            "mode_2_latsynapses": mode_2_latsynapses,
+            "mode0_latsynapses": mode0_latsynapses,
+            "mode1_latsynapses": mode1_latsynapses,
             "multi_latsynapses": multi_latsynapses,
-            "mode_1_to_mode_2_synapses": mode_1_to_mode_2_synapses,
-            "mode_2_to_mode_1_synapses": mode_2_to_mode_1_synapses,
-            "mode_1_to_multi_synapses": mode_1_to_multi_synapses,
-            "mode_2_to_multi_synapses": mode_2_to_multi_synapses,
+            "mode0_to_mode1_synapses": mode0_to_mode1_synapses,
+            "mode1_to_mode0_synapses": mode1_to_mode0_synapses,
+            "mode0_to_multi_synapses": mode0_to_multi_synapses,
+            "mode1_to_multi_synapses": mode1_to_multi_synapses,
         }
         
     def integrate(self, signal_1, signal_2):
@@ -369,81 +369,81 @@ class Cuppini2017(Integrator):
 
         # --- State containers ---
         z_1d = np.zeros(self.neurons)
-        mode_1_y = copy.deepcopy(z_1d)
-        mode_2_y = copy.deepcopy(z_1d)
+        mode0_y = copy.deepcopy(z_1d)
+        mode1_y = copy.deepcopy(z_1d)
         multi_y = copy.deepcopy(z_1d)
 
 
         z_2d = np.zeros((n_time_steps, self.neurons))
-        mode_1_res = copy.deepcopy(z_2d)
-        mode_2_res = copy.deepcopy(z_2d)
+        mode0_res = copy.deepcopy(z_2d)
+        mode1_res = copy.deepcopy(z_2d)
         multi_res = copy.deepcopy(z_2d)
         del z_1d, z_2d
 
-        tau_mode_1, tau_mode_2, tau_multi = self.tau
+        tau_mode0, tau_mode1, tau_multi = self.tau
 
         for i in range(n_time_steps):
             # Cross-modal input (via Wva, Wav)
-            mode_1_cm_input = np.sum(
-                signal_1.crossmodal_synapses * mode_2_y, axis=1
+            mode0_cm_input = np.sum(
+                signal_1.crossmodal_synapses * mode1_y, axis=1
             )
-            mode_2_cm_input = np.sum(
-                signal_2.crossmodal_synapses * mode_1_y, axis=1
+            mode1_cm_input = np.sum(
+                signal_2.crossmodal_synapses * mode0_y, axis=1
             )
 
             # Feedforward input to the multisensory layer
             multi_input = (
-                np.sum(signal_1.feedforward_synapses * mode_1_y, axis=1)
-                + np.sum(signal_2.feedforward_synapses * mode_2_y, axis=1)
+                np.sum(signal_1.feedforward_synapses * mode0_y, axis=1)
+                + np.sum(signal_2.feedforward_synapses * mode1_y, axis=1)
             )
 
             # External (stimulus) + cross-modal input
-            mode_1_input = signal_1.unimodal_matrix[i] + mode_1_cm_input
-            mode_2_input = signal_2.unimodal_matrix[i] + mode_2_cm_input
+            mode0_input = signal_1.unimodal_matrix[i] + mode0_cm_input
+            mode1_input = signal_2.unimodal_matrix[i] + mode1_cm_input
 
             # Noise, if enabled
             if self.noise:
-                mode_1_noise = -(
+                mode0_noise = -(
                     signal_1.overload.intensity * self.noise_level
                 ) + (
                     2 * signal_1.overload.intensity * self.noise_level
                 ) * self.random.random(self.neurons)
-                mode_2_noise = -(
+                mode1_noise = -(
                     signal_2.overload.intensity * self.noise_level
                 ) + (
                     2 * signal_2.overload.intensity * self.noise_level
                 ) * self.random.random(self.neurons)
-                mode_1_input = mode_1_input + mode_1_noise
-                mode_2_input = mode_2_input + mode_2_noise
+                mode0_input = mode0_input + mode0_noise
+                mode1_input = mode1_input + mode1_noise
 
             # Lateral input (Mexican Hat), within each layer
-            la = np.sum(signal_1.latsynapses * mode_1_y, axis=1)
-            lv = np.sum(signal_2.latsynapses * mode_2_y, axis=1)
+            la = np.sum(signal_1.latsynapses * mode0_y, axis=1)
+            lv = np.sum(signal_2.latsynapses * mode1_y, axis=1)
             lm = np.sum(signal_1.multi_latsynapses * multi_y, axis=1)
 
             # Total input per layer
-            u_a = la + mode_1_input
-            u_v = lv + mode_2_input
+            u_a = la + mode0_input
+            u_v = lv + mode1_input
             u_m = lm + multi_input
 
             # Euler step: y_new = y + dt * (1/tau) * (-y + sigmoid(u))
-            mode_1_y = mode_1_y + self.time_res * (
-                (-mode_1_y + self.sigmoid(u_a)) / tau_mode_1
+            mode0_y = mode0_y + self.time_res * (
+                (-mode0_y + self.sigmoid(u_a)) / tau_mode0
             )
-            mode_2_y = mode_2_y + self.time_res * (
-                (-mode_2_y + self.sigmoid(u_v)) / tau_mode_2
+            mode1_y = mode1_y + self.time_res * (
+                (-mode1_y + self.sigmoid(u_v)) / tau_mode1
             )
             multi_y = multi_y + self.time_res * (
                 (-multi_y + self.sigmoid(u_m)) / tau_multi
             )
 
-            mode_1_res[i, :] = mode_1_y
-            mode_2_res[i, :] = mode_2_y
+            mode0_res[i, :] = mode0_y
+            mode1_res[i, :] = mode1_y
             multi_res[i, :] = multi_y
 
         response = {
-            "mode_1": mode_1_res,
-            "mode_2": mode_2_res,
+            "mode0": mode0_res,
+            "mode1": mode1_res,
             "multi": multi_res,
         }
         extra = {
@@ -500,7 +500,7 @@ class Wiring:
         ----------
         stimuli : list of Stimulus
             The two stimuli to connect, in order: the first one goes to
-            mode_1 and the second one to mode_2.
+            mode0 and the second one to mode1.
         integrator : object
             Implements `.get_synaps_config()`, `.integrate(...)` and
             `.calculate_causes(...)`.
@@ -523,22 +523,22 @@ class Wiring:
             else self.stimuli_2.duration
         )
 
-        point_mode_1_stimuli = calculate_stimuli_input(
+        point_mode0_stimuli = calculate_stimuli_input(
             neurons=self.integrator.neurons,
             intensity=self.stimuli_1.intensity,
             scale=self.stimuli_1.sigma,
             loc=self.stimuli_1.position,
         )
-        point_mode_2_stimuli = calculate_stimuli_input(
+        point_mode1_stimuli = calculate_stimuli_input(
             neurons=self.integrator.neurons,
             intensity=self.stimuli_2.intensity,
             scale=self.stimuli_2.sigma,
             loc=self.stimuli_2.position,
         )
 
-        mode_1_stimuli = create_unimodal_stimuli_matrix(
+        mode0_stimuli = create_unimodal_stimuli_matrix(
             neurons=self.integrator.neurons,
-            stimuli=point_mode_1_stimuli,
+            stimuli=point_mode0_stimuli,
             stimuli_duration=stimuli_1_duration,
             onset=self.stimuli_1.onset,
             simulation_length=self.integrator.time_range[1],
@@ -547,9 +547,9 @@ class Wiring:
             stimuli_n=self.stimuli_1.stim_n,
             soa=self.stimuli_1.soa,
         )
-        mode_2_stimuli = create_unimodal_stimuli_matrix(
+        mode1_stimuli = create_unimodal_stimuli_matrix(
             neurons=self.integrator.neurons,
-            stimuli=point_mode_2_stimuli,
+            stimuli=point_mode1_stimuli,
             stimuli_duration=stimuli_2_duration,
             onset=self.stimuli_2.onset,
             simulation_length=self.integrator.time_range[1],
@@ -564,27 +564,27 @@ class Wiring:
         signal_1 = Signal(
             name=self.stimuli_1.modality,
             overload=self.stimuli_1,
-            latsynapses=config["mode_1_latsynapses"],
-            crossmodal_synapses=config["mode_2_to_mode_1_synapses"],
-            feedforward_synapses=config["mode_1_to_multi_synapses"],
+            latsynapses=config["mode0_latsynapses"],
+            crossmodal_synapses=config["mode1_to_mode0_synapses"],
+            feedforward_synapses=config["mode0_to_multi_synapses"],
             multi_latsynapses=config["multi_latsynapses"],
-            unimodal_matrix=mode_1_stimuli,
+            unimodal_matrix=mode0_stimuli,
         )
         signal_2 = Signal(
             name=self.stimuli_2.modality,
             overload=self.stimuli_2,
-            latsynapses=config["mode_2_latsynapses"],
-            crossmodal_synapses=config["mode_1_to_mode_2_synapses"],
-            feedforward_synapses=config["mode_2_to_multi_synapses"],
+            latsynapses=config["mode1_latsynapses"],
+            crossmodal_synapses=config["mode0_to_mode1_synapses"],
+            feedforward_synapses=config["mode1_to_multi_synapses"],
             multi_latsynapses=config["multi_latsynapses"],
-            unimodal_matrix=mode_2_stimuli,
+            unimodal_matrix=mode1_stimuli,
         )
 
         res, extra = self.integrator.integrate(signal_1, signal_2)
 
         _res = {
-            self.stimuli_1.modality: res["mode_1"],
-            self.stimuli_2.modality: res["mode_2"],
+            self.stimuli_1.modality: res["mode0"],
+            self.stimuli_2.modality: res["mode1"],
             "multi": res["multi"],
         }
 

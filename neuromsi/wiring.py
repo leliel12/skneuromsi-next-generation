@@ -75,11 +75,10 @@ class Backend:
         """Runs the simulation, delegating all the work to the integrator."""
 
         self.integrator.check_stimuli_compatible(
-            [stim.modality for stim in stimuli]
+            [stim.modality for stim in self.stimuli]
         )
         
         stimuli = self.order_stims()
-
         intg_conf = self.integrator.get_conf()
 
         signals = []
@@ -87,7 +86,7 @@ class Backend:
             signals.append(
                 stim.generate_signal(
                     config=intg_conf,
-                    mode=idx + 1,
+                    mode=idx,
                     neurons=self.integrator.neurons,
                     simulation_length=self.time_range[1],
                     time_res=self.time_res,
@@ -109,7 +108,7 @@ class Backend:
         })
 
         _res = {
-            stim.modality: response[f"mode_{idx + 1}"]
+            stim.modality: response[f"mode{idx}"]
             for idx, stim in enumerate(stimuli)
         }
         _res["multi"] = response["multi"]

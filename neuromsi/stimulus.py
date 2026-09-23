@@ -201,7 +201,7 @@ class Stimulus:
         neurons,
         simulation_length,
         time_res,
-        mode=1,
+        mode=0,
         dtype=np.float32,
     ):
         """
@@ -223,8 +223,8 @@ class Stimulus:
             Temporal resolution of the simulation.
         mode : int, optional
             Which unisensory layer of the integrator this stimulus belongs
-            to: 1 (mode_1) or 2 (mode_2). Determines which synapses are
-            associated with the Signal. Default 1.
+            to: 0 (mode0) or 1 (mode1). Determines which synapses are
+            associated with the Signal. Default 0.
         dtype : numpy class, optional
             Data type of the temporal matrix. Default np.float32.
 
@@ -240,14 +240,14 @@ class Stimulus:
             dtype=dtype,
         )
 
-        if mode == 1:
-            latsynapses = config["mode_1_latsynapses"]
-            crossmodal_synapses = config["mode_2_to_mode_1_synapses"]
-            feedforward_synapses = config["mode_1_to_multi_synapses"]
+        if mode == 0:
+            latsynapses = config["mode0_latsynapses"]
+            crossmodal_synapses = config["mode1_to_mode0_synapses"]
+            feedforward_synapses = config["mode0_to_multi_synapses"]
         else:
-            latsynapses = config["mode_2_latsynapses"]
-            crossmodal_synapses = config["mode_1_to_mode_2_synapses"]
-            feedforward_synapses = config["mode_2_to_multi_synapses"]
+            latsynapses = config["mode1_latsynapses"]
+            crossmodal_synapses = config["mode0_to_mode1_synapses"]
+            feedforward_synapses = config["mode1_to_multi_synapses"]
 
         return Signal(
             payload=self,
