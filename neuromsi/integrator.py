@@ -5,12 +5,12 @@ from utils.neural_tools import calculate_neural_distance
 
 class Integrator:
     """
-    Clase base de cualquier arquitectura neuronal.
+    Base class for any neural architecture.
 
-    Contiene lo que es comun a todas: los metodos para calcular la
-    conectividad sinaptica (lateral e inter-areal). Cada arquitectura
-    concreta (p.ej. Cuppini2017) hereda de aca y agrega sus propios
-    parametros, su dinamica y su mecanismo de inferencia causal.
+    Holds what is common to all of them: the methods to compute the
+    synaptic connectivity (lateral and inter-areal). Each concrete
+    architecture (e.g. Cuppini2017) inherits from here and adds its own
+    parameters, dynamics and causal-inference mechanism.
     """
 
     def calculate_lateral_synapses(
@@ -103,3 +103,31 @@ class Integrator:
                     -(np.square(d)) / (2 * np.square(sigma))
                 )
         return the_synapses
+
+    def execute(self, *signals, **kwargs):
+        """
+        Orchestrates the run over a set of signals.
+
+        Validates the modalities of the signals (via
+        ``check_stimuli_compatible``) and delegates the integration to
+        ``integrate``, passing the simulation ``**kwargs`` along (e.g.
+        time_range, time_res, random). It does not assume how many
+        signals or stimuli there are.
+        """
+        modalities = [signal.payload.modality for signal in signals]
+        self.check_stimuli_compatible(modalities)
+        return self.integrate(*signals, **kwargs)
+
+    def check_stimuli_compatible(self, modalities):
+        """
+        Validates the modalities of the incoming stimuli.
+
+        Receives an iterable of ``modality`` strings (e.g. "visual",
+        "auditory") instead of Stimulus objects, so the integrator is not
+        coupled to the stimuli. Each concrete architecture implements its
+        own rules (how many modalities it accepts and which ones).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement "
+            "check_stimuli_compatible()."
+        )

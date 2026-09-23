@@ -5,11 +5,7 @@ from dataclasses import dataclass
 
 
 
-from utils.neural_tools import (
-    calculate_neural_distance,
-    calculate_stimuli_input,
-    create_unimodal_stimuli_matrix,
-)
+from utils.neural_tools import calculate_neural_distance
 from utils.readout_tools import calculate_spatiotemporal_causes_from_peaks
 
 
@@ -23,7 +19,7 @@ class Stimulus:
     neural architecture that will later process it.
 
     It only describes "what happened in the world": where, how strong, how
-    uncertain and when. It knows nothing about neurons, receptive fields
+    uncertain, and when. It knows nothing about neurons, receptive fields
     or integration dynamics.
     """
 
@@ -80,6 +76,129 @@ class Stimulus:
             f"onset={self.onset}, duration={self.duration}, "
             f"stim_n={self.stim_n}, soa={self.soa})"
         )
+
+    def calculate_stimuli_input(self, neurons, dtype=np.float32):
+        """
+        Renders this stimulus as a spatial input Gaussian.
+
+        Discretizes the stimulus (position, intensity and sigma) over an
+        array of ``neurons`` neurons that encode the 1D space. The
+        Gaussian reflects the uncertainty in the stimulus detection.
+
+        Parameters
+        ----------
+        neurons : int
+            Number of neurons over which the stimulus is sampled.
+        dtype : numpy class, optional
+            Data type of the resulting array. Default np.float32.
+
+        Returns
+        -------
+        numpy.array
+            The value of the stimulus for each neuron.
+        """
+        the_stimuli = np.zeros(neurons, dtype=dtype)
+
+        for neuron_j in range(neurons):
+            distance = calculate_neural_distance(neurons, neuron_j, self.position)
+            the_stimuli[neuron_j] = self.intensity * np.exp(
+                -(np.square(distance)) / (2 * np.square(self.sigma))
+            )
+
+        return the_stimuli
+
+    def create_unimodal_stimuli_matrix(
+        self, neurons, simulation_length, time_res, duration=None, dtype=np.float32
+    ):
+        """
+        Builds the temporal input matrix of this stimulus.
+
+        Combines the spatial input (``calculate_stimuli_input``) with the
+        stimulus timing (onset, duration, repetitions and SOA) to produce
+        the activation matrix (times x neurons) that the integrator
+        consumes.
+
+        Parameters
+        ----------
+        neurons : int
+            Number of neurons over which the stimulus is sampled.
+        simulation_length : float
+            Total duration of the simulation in time units.
+        time_res : float
+            Temporal resolution of the simulation (integration step).
+        duration : float or None, optional
+            Effective duration of the stimulus. If None, the stimulus's
+            own duration is used, and if that is also undefined, the
+            stimulus is assumed to last the whole simulation.
+        dtype : numpy class, optional
+            Data type of the resulting array. Default np.float32.
+
+        Returns
+        -------
+        numpy.array
+            The input matrix (times x neurons).
+
+        Raises
+        ------
+        ValueError
+            If the total duration of all stimuli plus that of the
+            inter-stimulus intervals exceeds ``simulation_length``.
+        """
+        onset = int(self.onset)
+        stimuli_n = int(self.stim_n)
+        soa = self.soa
+
+        if duration is None:
+            duration = self.duration if self.duration is not None else simulation_length
+
+        if duration * stimuli_n > simulation_length:
+            raise ValueError("Stimuli total duration exceeds simulation length.")
+
+        if soa is not None:
+            soa = int(soa)
+            if duration * stimuli_n + soa * (stimuli_n - 1) > simulation_length:
+                raise ValueError(
+                    "Stimuli total duration exceeds simulation length."
+                )
+            if soa < duration:
+                raise ValueError("SOA must be longer than stimulus duration.")
+
+        stimuli = self.calculate_stimuli_input(neurons, dtype=dtype)
+        no_stim = np.zeros(neurons, dtype=dtype)
+
+        if stimuli_n == 0:
+            stim = np.tile(no_stim, (simulation_length, 1))
+            stimuli_matrix = np.repeat(stim, 1 / time_res, axis=0)
+            return stimuli_matrix
+
+        # Input before onset
+        pre_stim = np.tile(no_stim, (onset, 1))
+
+        # Input during stimulus delivery
+        stim = np.tile(stimuli, (duration, 1))
+
+        # Input during onset asynchrony
+        soa_stim = (
+            np.tile(no_stim, (soa - duration, 1))
+            if soa is not None
+            else None
+        )
+
+        # Input after stimulation
+        post_stim_time = simulation_length - onset - duration * stimuli_n
+        post_stim_time = (
+            post_stim_time - (soa - duration) * (stimuli_n - 1)
+            if soa is not None
+            else post_stim_time
+        )
+        post_stim = np.tile(no_stim, (post_stim_time, 1))
+
+        # Input concatenation
+        stim_list = [stim, soa_stim] * (stimuli_n - 1)
+        complete_stim = np.vstack((pre_stim, *stim_list, stim, post_stim))
+        stimuli_matrix = np.repeat(complete_stim, 1 / time_res, axis=0)
+
+        return stimuli_matrix
 
 
 class Visual(Stimulus):
@@ -252,15 +371,6 @@ class Cuppini2017(Integrator):
         lateral_params=None,        # Mexican Hat, one per layer
         noise=False,
         noise_level=0.40,
-        seed=None,
-        position_range=(0, 180),
-        position_res=1,
-        time_range=(0, 100),
-        time_res=0.01,
-        causes_kind="count",
-        causes_dim="space",
-        causes_peak_threshold=0.15,
-        causes_peak_distance=None,
     ):
         if len(tau) != 3:
             raise ValueError(
@@ -297,17 +407,6 @@ class Cuppini2017(Integrator):
 
         self.noise = noise
         self.noise_level = noise_level
-        self.position_range = position_range
-        self.position_res = float(position_res)
-        self.time_range = time_range
-        self.time_res = float(time_res)
-
-        self.causes_kind = causes_kind
-        self.causes_dim = causes_dim
-        self.causes_peak_threshold = causes_peak_threshold
-        self.causes_peak_distance = causes_peak_distance
-
-        self.random = np.random.default_rng(seed=seed)
 
     def sigmoid(self, u):
         """Sigmoid activation function F(u), shared by the 3 layers."""
@@ -360,10 +459,10 @@ class Cuppini2017(Integrator):
             "mode_2_to_multi_synapses": mode_2_to_multi_synapses,
         }
         
-    def integrate(self, signal_1, signal_2):
+    def integrate(self, signal_1, signal_2, time_range, time_res, random):
 
         hist_times = np.arange(
-                            self.time_range[0], self.time_range[1], self.time_res
+                            time_range[0], time_range[1], time_res
                         )
         n_time_steps = hist_times.size
 
@@ -404,15 +503,15 @@ class Cuppini2017(Integrator):
             # Noise, if enabled
             if self.noise:
                 mode_1_noise = -(
-                    signal_1.overload.intensity * self.noise_level
+                    signal_1.payload.intensity * self.noise_level
                 ) + (
-                    2 * signal_1.overload.intensity * self.noise_level
-                ) * self.random.random(self.neurons)
+                    2 * signal_1.payload.intensity * self.noise_level
+                ) * random.random(self.neurons)
                 mode_2_noise = -(
-                    signal_2.overload.intensity * self.noise_level
+                    signal_2.payload.intensity * self.noise_level
                 ) + (
-                    2 * signal_2.overload.intensity * self.noise_level
-                ) * self.random.random(self.neurons)
+                    2 * signal_2.payload.intensity * self.noise_level
+                ) * random.random(self.neurons)
                 mode_1_input = mode_1_input + mode_1_noise
                 mode_2_input = mode_2_input + mode_2_noise
 
@@ -427,13 +526,13 @@ class Cuppini2017(Integrator):
             u_m = lm + multi_input
 
             # Euler step: y_new = y + dt * (1/tau) * (-y + sigmoid(u))
-            mode_1_y = mode_1_y + self.time_res * (
+            mode_1_y = mode_1_y + time_res * (
                 (-mode_1_y + self.sigmoid(u_a)) / tau_mode_1
             )
-            mode_2_y = mode_2_y + self.time_res * (
+            mode_2_y = mode_2_y + time_res * (
                 (-mode_2_y + self.sigmoid(u_v)) / tau_mode_2
             )
-            multi_y = multi_y + self.time_res * (
+            multi_y = multi_y + time_res * (
                 (-multi_y + self.sigmoid(u_m)) / tau_multi
             )
 
@@ -447,10 +546,6 @@ class Cuppini2017(Integrator):
             "multi": multi_res,
         }
         extra = {
-            "causes_kind": self.causes_kind,
-            "causes_dim": self.causes_dim,
-            "causes_peak_threshold": self.causes_peak_threshold,
-            "causes_peak_distance": self.causes_peak_distance,
             "stim_position": [
                 signal_1.overload.position,
                 signal_2.overload.position,
@@ -494,7 +589,19 @@ class Wiring:
     who" among the pieces it connects.
     """
 
-    def __init__(self, stimuli, integrator):
+    def __init__(
+        self,
+        stimuli,
+        integrator,
+        *,
+        seed=None,
+        time_range=(0, 100),
+        time_res=0.01,
+        causes_kind="count",
+        causes_dim="space",
+        causes_peak_threshold=0.15,
+        causes_peak_distance=None,
+    ):
         """
         Parameters
         ----------
@@ -509,54 +616,28 @@ class Wiring:
         self.stimuli_2 = stimuli[1]
         self.integrator = integrator
 
+        self.seed = seed
+        self.time_range = time_range
+        self.time_res = float(time_res)
+        self.causes_kind = causes_kind
+        self.causes_dim = causes_dim
+        self.causes_peak_threshold = causes_peak_threshold
+        self.causes_peak_distance = causes_peak_distance
+
+        self.random = np.random.default_rng(seed=seed)
+
     def run(self):
         """Runs the simulation, delegating all the work to the integrator."""
 
-        stimuli_1_duration = (
-            self.integrator.time_range[1]
-            if self.stimuli_1.duration is None
-            else self.stimuli_1.duration
-        )
-        stimuli_2_duration = (
-            self.integrator.time_range[1]
-            if self.stimuli_2.duration is None
-            else self.stimuli_2.duration
-        )
-
-        point_mode_1_stimuli = calculate_stimuli_input(
+        mode_1_stimuli = self.stimuli_1.create_unimodal_stimuli_matrix(
             neurons=self.integrator.neurons,
-            intensity=self.stimuli_1.intensity,
-            scale=self.stimuli_1.sigma,
-            loc=self.stimuli_1.position,
+            simulation_length=self.time_range[1],
+            time_res=self.time_res,
         )
-        point_mode_2_stimuli = calculate_stimuli_input(
+        mode_2_stimuli = self.stimuli_2.create_unimodal_stimuli_matrix(
             neurons=self.integrator.neurons,
-            intensity=self.stimuli_2.intensity,
-            scale=self.stimuli_2.sigma,
-            loc=self.stimuli_2.position,
-        )
-
-        mode_1_stimuli = create_unimodal_stimuli_matrix(
-            neurons=self.integrator.neurons,
-            stimuli=point_mode_1_stimuli,
-            stimuli_duration=stimuli_1_duration,
-            onset=self.stimuli_1.onset,
-            simulation_length=self.integrator.time_range[1],
-            time_res=self.integrator.time_res,
-            dt=self.integrator.time_res,
-            stimuli_n=self.stimuli_1.stim_n,
-            soa=self.stimuli_1.soa,
-        )
-        mode_2_stimuli = create_unimodal_stimuli_matrix(
-            neurons=self.integrator.neurons,
-            stimuli=point_mode_2_stimuli,
-            stimuli_duration=stimuli_2_duration,
-            onset=self.stimuli_2.onset,
-            simulation_length=self.integrator.time_range[1],
-            time_res=self.integrator.time_res,
-            dt=self.integrator.time_res,
-            stimuli_n=self.stimuli_2.stim_n,
-            soa=self.stimuli_2.soa,
+            simulation_length=self.time_range[1],
+            time_res=self.time_res,
         )
 
         config = self.integrator.get_synaps_config()
@@ -580,7 +661,20 @@ class Wiring:
             unimodal_matrix=mode_2_stimuli,
         )
 
-        res, extra = self.integrator.integrate(signal_1, signal_2)
+        res, extra = self.integrator.integrate(
+            signal_1,
+            signal_2,
+            time_range=self.time_range,
+            time_res=self.time_res,
+            random=self.random,
+        )
+
+        extra.update({
+            "causes_kind": self.causes_kind,
+            "causes_dim": self.causes_dim,
+            "causes_peak_threshold": self.causes_peak_threshold,
+            "causes_peak_distance": self.causes_peak_distance,
+        })
 
         _res = {
             self.stimuli_1.modality: res["mode_1"],

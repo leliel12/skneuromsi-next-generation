@@ -34,7 +34,7 @@ cerebro = Cuppini2017(
         time_res=0.01,
     )
 
-model = Wiring(stimuli=[oreja, ojos], integrator=cerebro)
+model = Wiring(stimuli=[ojos, oreja], integrator=cerebro)
 res, extra = model.run()
 print(res)
 causes = model.calculate_causes(res, extra)

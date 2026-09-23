@@ -1,30 +1,31 @@
 """
-Refactor del modelo de Cuppini et al. (2017) en tres piezas separadas,
-cada clase en su propio modulo:
+Refactor of the Cuppini et al. (2017) model into three separate pieces,
+each class in its own module:
 
 1. stimulus.py:
-   Los estimulos (Stimulus y sus subclases Visual, Audio) representan
-   UNICAMENTE el evento sensorial externo (posicion, intensidad,
-   incertidumbre, timing). No saben nada de neuronas, arreglos,
-   sigmoides ni sinapsis.
+   The stimuli (Stimulus and its subclasses Visual, Audio) represent the
+   external sensory event (position, intensity, uncertainty, timing) and
+   know how to render themselves as a neural input
+   (calculate_stimuli_input, create_unimodal_stimuli_matrix). They know
+   nothing about the integration dynamics or the network connectivity.
 
 2. integrator.py + cuppini2017.py:
-   Integrator es la clase base generica: contiene los metodos para
-   calcular la conectividad sinaptica. Cuppini2017 hereda de ella y
-   agrega lo especifico de esta arquitectura (mas signal.py, que
-   empaqueta un estimulo con sus sinapsis para integrar).
+   Integrator is the generic base class: it contains the methods to
+   compute the synaptic connectivity. Cuppini2017 inherits from it and
+   adds what is specific to this architecture (plus signal.py, which
+   packages a stimulus together with its synapses for integration).
 
 3. wiring.py:
-   Solo conecta estimulos con el integrador, enrutando cada estimulo a
-   la entrada correspondiente segun su `.modality`. No tiene parametros
-   propios de arquitectura ni de simulacion.
+   Backend connects stimuli with the integrator: it validates the
+   stimuli, asks them for their Signal (via Stimulus.generate_signal) and
+   integrates. It has no architecture or simulation parameters of its own.
 """
 
 from .stimulus import Audio, Stimulus, Visual
 from .signal import Signal
 from .integrator import Integrator
 from .cuppini2017 import Cuppini2017
-from .wiring import Wiring
+from .wiring import Backend
 
 __all__ = [
     "Stimulus",
@@ -33,5 +34,5 @@ __all__ = [
     "Signal",
     "Integrator",
     "Cuppini2017",
-    "Wiring",
+    "Backend",
 ]

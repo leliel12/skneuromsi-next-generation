@@ -1,28 +1,44 @@
-import numpy as np
+from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from .stimulus import Stimulus
+if TYPE_CHECKING:
+    from .stimulus import Stimulus
 
 
 @dataclass
 class Signal:
     """
-    Empaqueta UN estimulo (overload) junto con todos los valores que le
-    corresponden a esa modalidad: duracion, matriz temporal, input puntual,
-    sinapsis laterales de su capa, sinapsis cross-modales que recibe desde
-    la otra capa, y sinapsis feedforward hacia la capa multisensorial.
+    Packages ONE stimulus (payload) together with the information needed to
+    integrate it (metadata): the unimodal temporal matrix and the synapses
+    of its layer (lateral, cross-modal, feedforward and the multisensory
+    layer's ones). Stimulus.generate_signal() builds one per stimulus and
+    Backend passes them to integrate().
 
-    Tambien lleva copiados los valores compartidos de la simulacion
-    (multi_latsynapses) para que cada Signal sea autocontenido. Wiring
-    construye uno por estimulo y se los pasa a integrate().
+    The unimodal_matrix, latsynapses, etc. properties are read shortcuts
+    over metadata.
     """
 
-    name: str ## es necesario?
-    overload: Stimulus # idem, enrealidad termina siendo innecesaria tanta info
+    payload: Stimulus
+    metadata: dict
 
-    unimodal_matrix: np.ndarray
-    latsynapses: np.ndarray
-    crossmodal_synapses: np.ndarray
-    feedforward_synapses: np.ndarray
-    multi_latsynapses: np.ndarray ## raro
+    @property
+    def unimodal_matrix(self):
+        return self.metadata["unimodal_matrix"]
+
+    @property
+    def latsynapses(self):
+        return self.metadata["latsynapses"]
+
+    @property
+    def crossmodal_synapses(self):
+        return self.metadata["crossmodal_synapses"]
+
+    @property
+    def feedforward_synapses(self):
+        return self.metadata["feedforward_synapses"]
+
+    @property
+    def multi_latsynapses(self):
+        return self.metadata["multi_latsynapses"]
