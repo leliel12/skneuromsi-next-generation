@@ -13,9 +13,7 @@ oreja = Audio(position=35, intensity=28, sigma=32)
 ojos = Visual(position=52, intensity=27, sigma=4)
 
 model = Backend(stimuli=[ojos, oreja], 
-                integrator=cerebro, seed=42,
-                time_range=(0, 100),
-                time_res=0.01,
+                integrator=cerebro, 
                 position_range=(0, 90),
                 )
 
