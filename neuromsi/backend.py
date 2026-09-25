@@ -27,11 +27,12 @@ class Backend:
         seed=None,
         time_range=(0, 100),
         time_res=0.01,
+        position_range=(0, 180),
+        position_res=1,
         causes_kind="count",
         causes_dim="space",
         causes_peak_threshold=0.15,
         causes_peak_distance=None,
-        position_res=1,
     ):
         """
         Parameters
@@ -42,6 +43,14 @@ class Backend:
         integrator : object
             Implements `.get_conf()`, `.check_stimuli_compatible(...)`,
             `.execute(...)` and `.calculate_causes(...)`.
+        position_range : (float, float), optional
+            The (min, max) position covered by the integrator neurons, in
+            degrees. It must describe exactly `integrator.neurons`
+            positions at `position_res`, otherwise the result cannot be
+            labelled. Default (0, 180).
+        position_res : float, optional
+            Angular step (deg) between two consecutive positions.
+            Default 1.
         """
         self.stimuli = tuple(stimuli)
         self.integrator = integrator
@@ -54,8 +63,11 @@ class Backend:
         self.causes_peak_threshold = causes_peak_threshold
         self.causes_peak_distance = causes_peak_distance
         self.position_res = float(position_res)
+        self.position_range = position_range
 
         self.random = np.random.default_rng(seed=seed)
+
+        self._check_position_range()
 
     def order_stims(self):
         """
@@ -74,6 +86,38 @@ class Backend:
             return tuple(by_modality[modality] for modality in order)
         except KeyError:
             return self.stimuli
+
+    def _check_position_range(self):
+        """
+        Checks that 'position_range' covers the integrator neurons.
+
+        Every neuron encodes a slice of the space defined by 'position_range',
+        so the number of neurons must be exactly the number of positions the
+        range describes at 'position_res'. Checking it here avoids running
+        the whole simulation only to fail when building the result.
+
+        Raises
+        ------
+        ValueError
+            If 'position_range' is not a (min, max) pair, or if it does not
+            match the number of neurons of the integrator.
+
+        """
+        prange = self.position_range
+        if len(prange) != 2 or prange[0] > prange[1]:
+            raise ValueError(
+                f"The position_range must be (min, max). Got {prange}"
+            )
+
+        neurons = self.integrator.neurons
+        expected = int(abs(prange[1] - prange[0]) / self.position_res) or 1
+        if expected != neurons:
+            raise ValueError(
+                "The position_range and position_res do not match the "
+                f"integrator. Expected {expected} positions, "
+                f"but the integrator has {neurons} neurons. "
+                f"Set position_range=(0, {neurons * self.position_res})"
+            )
 
     def run(self):
         """
@@ -155,11 +199,11 @@ class Backend:
         modes["multi"] = response["multi"]
 
         causes = self.calculate_causes(response, extra)
-        neurons = self.integrator.neurons
         run_parameters = {
             "seed": self.seed,
             "time_range": self.time_range,
             "time_res": self.time_res,
+            "position_range": self.position_range,
             "position_res": self.position_res,
             "stimuli": {
                 stim.modality: {
@@ -182,7 +226,7 @@ class Backend:
             nmap={mode: mode for mode in modes},
             modes_dict=modes,
             time_range=self.time_range,
-            position_range=(0, neurons * self.position_res),
+            position_range=self.position_range,
             time_res=self.time_res,
             position_res=self.position_res,
             causes=causes,
