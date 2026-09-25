@@ -24,8 +24,8 @@ each class in its own module:
 from .stimulus import Audio, Stimulus, Visual
 from .signal import Signal
 from .integrator import Integrator
-from .cuppini2017 import Cuppini2017
-from .wiring import Backend
+from .neural.cuppini2017 import Cuppini2017
+from .backend import Backend
 
 __all__ = [
     "Stimulus",

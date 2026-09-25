@@ -1,5 +1,7 @@
 import numpy as np
 
+from neuromsi.core import NDResult
+
 
 class Backend:
     """
@@ -29,6 +31,7 @@ class Backend:
         causes_dim="space",
         causes_peak_threshold=0.15,
         causes_peak_distance=None,
+        position_res=1,
     ):
         """
         Parameters
@@ -50,6 +53,7 @@ class Backend:
         self.causes_dim = causes_dim
         self.causes_peak_threshold = causes_peak_threshold
         self.causes_peak_distance = causes_peak_distance
+        self.position_res = float(position_res)
 
         self.random = np.random.default_rng(seed=seed)
 
@@ -72,7 +76,13 @@ class Backend:
             return self.stimuli
 
     def run(self):
-        """Runs the simulation, delegating all the work to the integrator."""
+        """
+        Runs the simulation and returns its result.
+
+        Validates the stimuli, asks the integrator for its configuration,
+        generates a signal per stimulus, runs the integration, and delegates
+        the packaging of the result to ``make_ndresult``.
+        """
 
         self.integrator.check_stimuli_compatible(
             [stim.modality for stim in self.stimuli]
@@ -100,6 +110,35 @@ class Backend:
             random=self.random,
         )
 
+        return self.make_ndresult(response, extra, stimuli)
+
+    def make_ndresult(self, response, extra, stimuli):
+        """
+        Builds the NDResult of the run out of the integrator response.
+
+        This is where everything that is not the simulation itself happens:
+        the causes are calculated, the response is labelled with the real
+        modality of each stimulus, the run parameters are collected, and
+        the whole thing is packed into an NDResult.
+
+        Parameters
+        ----------
+        response : dict
+            The raw response of the integrator, keyed by 'mode0', 'mode1',
+            'multi', etc.
+        extra : dict
+            Extra information reported by the integrator. It is updated in
+            place with the causes parameters used for this run.
+        stimuli : tuple of Stimulus
+            The stimuli in the same order in which they were given to the
+            integrator, i.e. the 'idx'-th one produced the 'mode{idx}'
+            entry of 'response'.
+
+        Returns
+        -------
+        NDResult
+            The result of the run.
+        """
         extra.update({
             "causes_kind": self.causes_kind,
             "causes_dim": self.causes_dim,
@@ -107,13 +146,49 @@ class Backend:
             "causes_peak_distance": self.causes_peak_distance,
         })
 
-        _res = {
+        # replace the generic mode names of the integrator by the real
+        # modality of the stimulus that fed each unisensory layer
+        modes = {
             stim.modality: response[f"mode{idx}"]
             for idx, stim in enumerate(stimuli)
         }
-        _res["multi"] = response["multi"]
+        modes["multi"] = response["multi"]
 
-        return _res, extra
+        causes = self.calculate_causes(response, extra)
+        neurons = self.integrator.neurons
+        run_parameters = {
+            "seed": self.seed,
+            "time_range": self.time_range,
+            "time_res": self.time_res,
+            "position_res": self.position_res,
+            "stimuli": {
+                stim.modality: {
+                    "position": stim.position,
+                    "intensity": stim.intensity,
+                    "sigma": stim.sigma,
+                    "onset": stim.onset,
+                    "duration": stim.duration,
+                    "stim_n": stim.stim_n,
+                    "soa": stim.soa,
+                }
+                for stim in stimuli
+            },
+        }
+
+        return NDResult.from_modes_dict(
+            mname=type(self.integrator).__name__,
+            mtype="integrator",
+            output_mode="multi",
+            nmap={mode: mode for mode in modes},
+            modes_dict=modes,
+            time_range=self.time_range,
+            position_range=(0, neurons * self.position_res),
+            time_res=self.time_res,
+            position_res=self.position_res,
+            causes=causes,
+            run_parameters=run_parameters,
+            extra=extra,
+        )
 
     def calculate_causes(self, response, extra):
         """Shortcut to call integrator.calculate_causes(...)."""

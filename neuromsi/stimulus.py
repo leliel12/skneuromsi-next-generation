@@ -1,6 +1,6 @@
 import numpy as np
 
-from utils.neural_tools import calculate_neural_distance
+from neuromsi.utils.neural_tools import calculate_neural_distance
 
 from .signal import Signal
 
@@ -261,10 +261,22 @@ class Stimulus:
         )
 
     @classmethod
-    def get_stimuli(cls):
-        """Returns an instance of the class with default values."""
+    def get_stimuli(cls, position):
+        """
+        Returns an instance of the class with default values.
+
+        Parameters
+        ----------
+        position : float
+            Spatial position of the stimulus, in degrees.
+
+        Returns
+        -------
+        Stimulus
+            A stimulus at 'position' and default values elsewhere.
+        """
         return cls(
-            position=90,
+            position=position,
             intensity=27,
             sigma=4,
             onset=0,
@@ -278,10 +290,22 @@ class Visual(Stimulus):
     modality = "visual"
 
     @classmethod
-    def get_stimuli(cls):
-        """Returns a visual stimulus with the default values."""
+    def get_stimuli(cls, position):
+        """
+        Returns a visual stimulus with the default values.
+
+        Parameters
+        ----------
+        position : float
+            Spatial position of the stimulus, in degrees.
+
+        Returns
+        -------
+        Visual
+            A visual stimulus at 'position' and default values elsewhere.
+        """
         return cls(
-            position=90,
+            position=position,
             intensity=27,
             sigma=4,
             onset=0,
@@ -295,10 +319,22 @@ class Audio(Stimulus):
     modality = "auditory"
 
     @classmethod
-    def get_stimuli(cls):
-        """Returns an auditory stimulus with the default values."""
+    def get_stimuli(cls, position):
+        """
+        Returns an auditory stimulus with the default values.
+
+        Parameters
+        ----------
+        position : float
+            Spatial position of the stimulus, in degrees.
+
+        Returns
+        -------
+        Audio
+            An auditory stimulus at 'position' and default values elsewhere.
+        """
         return cls(
-            position=100,
+            position=position,
             intensity=28,
             sigma=32,
             onset=0,

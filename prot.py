@@ -5,12 +5,12 @@ from dataclasses import dataclass
 
 
 
-from utils.neural_tools import (
+from neuromsi.utils.neural_tools import (
     calculate_neural_distance,
     calculate_stimuli_input,
     create_unimodal_stimuli_matrix,
 )
-from utils.readout_tools import calculate_spatiotemporal_causes_from_peaks
+from neuromsi.utils.readout_tools import calculate_spatiotemporal_causes_from_peaks
 
 
 # =========================================================================

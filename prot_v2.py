@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 
 
-from utils.neural_tools import calculate_neural_distance
-from utils.readout_tools import calculate_spatiotemporal_causes_from_peaks
+from neuromsi.utils.neural_tools import calculate_neural_distance
+from neuromsi.utils.readout_tools import calculate_spatiotemporal_causes_from_peaks
 
 
 # =========================================================================

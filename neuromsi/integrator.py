@@ -1,6 +1,6 @@
 import numpy as np
 
-from utils.neural_tools import calculate_neural_distance
+from neuromsi.utils.neural_tools import calculate_neural_distance
 
 
 class Integrator:

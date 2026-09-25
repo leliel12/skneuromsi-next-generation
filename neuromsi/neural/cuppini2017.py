@@ -1,8 +1,8 @@
 import copy
 import numpy as np
 
-from .integrator import Integrator
-from utils.readout_tools import calculate_spatiotemporal_causes_from_peaks
+from ..integrator import Integrator
+from neuromsi.utils.readout_tools import calculate_spatiotemporal_causes_from_peaks
 
 class Cuppini2017(Integrator):
     """
