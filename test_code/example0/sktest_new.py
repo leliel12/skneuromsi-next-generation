@@ -8,16 +8,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from neuromsi import Audio, Cuppini2017, Visual, Backend
 
-## Codigo de testeo de prototipo actual para comparar resultados con los de la libreria original
-cerebro = Cuppini2017(
+brain = Cuppini2017(
     neurons=90,
 )
 
-oreja = Audio(position=35, intensity=28, sigma=32)
-ojos = Visual(position=52, intensity=27, sigma=4)
+ears = Audio(position=35, intensity=28, sigma=32)
+eyes = Visual(position=52, intensity=27, sigma=4)
 
-model = Backend(stimuli=[ojos, oreja], 
-                integrator=cerebro, 
+model = Backend(stimuli=[eyes, ears], 
+                integrator=brain, 
                 position_range=(0, 90),
                 )
 

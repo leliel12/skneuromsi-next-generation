@@ -7,15 +7,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from neuromsi import Audio, Cuppini2017, Visual, Backend
 
-oreja = Audio(position=20, intensity=28, sigma=32, onset=0, duration=100)
-ojos = Visual(position=65, intensity=27, sigma=4, onset=0, duration=100)
+ears = Audio(position=20, intensity=28, sigma=32, onset=0, duration=100)
+eyes = Visual(position=65, intensity=27, sigma=4, onset=0, duration=100)
 
-cerebro = Cuppini2017(
+brain = Cuppini2017(
     neurons=90,
 )
 
-model = Backend(stimuli=[ojos, oreja], 
-                integrator=cerebro, 
+model = Backend(stimuli=[eyes, ears], 
+                integrator=brain, 
                 causes_kind="count",
                 causes_dim="space",
                 causes_peak_threshold=0.15,
