@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 import numpy as np
 
 from neuromsi.utils.neural_tools import calculate_neural_distance
@@ -104,28 +106,30 @@ class Integrator:
                 )
         return the_synapses
 
-    def execute(self, *signals, **kwargs):
+    def execute(self, signals, **kwargs):
         """
         Orchestrates the run over a set of signals.
 
-        Validates the modalities of the signals (via
-        ``check_stimuli_compatible``) and delegates the integration to
-        ``integrate``, passing the simulation ``**kwargs`` along (e.g.
-        time_range, time_res, random). It does not assume how many
-        signals or stimuli there are.
+        Validates modality-keyed sensory signals and delegates integration.
         """
-        modalities = [signal.payload.modality for signal in signals]
-        self.check_stimuli_compatible(modalities)
-        return self.integrate(*signals, **kwargs)
+        if not isinstance(signals, Mapping):
+            raise TypeError("signals must be a mapping keyed by modality.")
+        for modality, signal in signals.items():
+            if modality != signal.modality:
+                raise ValueError(
+                    f"Signal key {modality!r} does not match its modality "
+                    f"{signal.modality!r}."
+                )
+        self.check_stimuli_compatible(signals.keys())
+        return self.integrate(signals, **kwargs)
 
     def check_stimuli_compatible(self, modalities):
         """
         Validates the modalities of the incoming stimuli.
 
-        Receives an iterable of ``modality`` strings (e.g. "visual",
-        "auditory") instead of Stimulus objects, so the integrator is not
-        coupled to the stimuli. Each concrete architecture implements its
-        own rules (how many modalities it accepts and which ones).
+        Receives modality names instead of Stimulus objects, so the
+        integrator is not coupled to the stimulus descriptions. Each
+        concrete architecture implements its own compatibility rules.
         """
         raise NotImplementedError(
             f"{type(self).__name__} must implement "

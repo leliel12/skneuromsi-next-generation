@@ -197,34 +197,22 @@ class Stimulus:
 
     def generate_signal(
         self,
-        config,
         neurons,
         simulation_length,
         time_res,
-        mode=0,
         dtype=np.float32,
     ):
         """
-        Builds the complete Signal with which this stimulus enters the
-        integrator: it creates the unimodal temporal matrix and packages
-        it together with the synapses of its layer.
+        Encodes this stimulus as external sensory drive for an integrator.
 
         Parameters
         ----------
-        config : dict
-            The dict returned by ``Integrator.get_conf()``, with the
-            synapses of the whole architecture (lateral, cross-modal and
-            feedforward).
         neurons : int
             Number of neurons of the integrator.
         simulation_length : float
             Total duration of the simulation.
         time_res : float
             Temporal resolution of the simulation.
-        mode : int, optional
-            Which unisensory layer of the integrator this stimulus belongs
-            to: 0 (mode0) or 1 (mode1). Determines which synapses are
-            associated with the Signal. Default 0.
         dtype : numpy class, optional
             Data type of the temporal matrix. Default np.float32.
 
@@ -233,32 +221,14 @@ class Stimulus:
         Signal
             The signal ready to be integrated.
         """
-        unimodal_matrix = self.create_unimodal_stimuli_matrix(
+        values = self.create_unimodal_stimuli_matrix(
             neurons=neurons,
             simulation_length=simulation_length,
             time_res=time_res,
             dtype=dtype,
         )
 
-        if mode == 0:
-            latsynapses = config["mode0_latsynapses"]
-            crossmodal_synapses = config["mode1_to_mode0_synapses"]
-            feedforward_synapses = config["mode0_to_multi_synapses"]
-        else:
-            latsynapses = config["mode1_latsynapses"]
-            crossmodal_synapses = config["mode0_to_mode1_synapses"]
-            feedforward_synapses = config["mode1_to_multi_synapses"]
-
-        return Signal(
-            payload=self,
-            metadata={
-                "unimodal_matrix": unimodal_matrix,
-                "latsynapses": latsynapses,
-                "crossmodal_synapses": crossmodal_synapses,
-                "feedforward_synapses": feedforward_synapses,
-                "multi_latsynapses": config["multi_latsynapses"],
-            },
-        )
+        return Signal(modality=self.modality, values=values)
 
     @classmethod
     def get_stimuli(cls, position):

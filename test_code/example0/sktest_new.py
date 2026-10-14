@@ -15,7 +15,7 @@ brain = Cuppini2017(
 ears = Audio(position=35, intensity=28, sigma=32)
 eyes = Visual(position=52, intensity=27, sigma=4)
 
-model = Backend(stimuli=[eyes, ears], 
+model = Backend(stimuli=[ears, eyes], 
                 integrator=brain, 
                 position_range=(0, 90),
                 )

@@ -34,6 +34,8 @@ class Cuppini2017(Integrator):
         noise=False,
         noise_level=0.40,
     ):
+        if mode0 == mode1:
+            raise ValueError("mode0 and mode1 must name different modalities.")
         if len(tau) != 3:
             raise ValueError(
                 "tau must have exactly 3 values: "
@@ -41,6 +43,8 @@ class Cuppini2017(Integrator):
             )
 
         self.neurons = neurons
+        self.mode0 = mode0
+        self.mode1 = mode1
         self.tau = tau
         self.s = s
         self.theta = theta
@@ -75,20 +79,20 @@ class Cuppini2017(Integrator):
         return 1 / (1 + np.exp(-self.s * (u - self.theta)))
 
     def check_stimuli_compatible(self, modalities):
-        """Cuppini2017 requires exactly two modalities: visual and auditory."""
+        """Require exactly one signal for each configured sensory modality."""
         modalities = list(modalities)
         if len(modalities) != 2:
             raise ValueError(
                 "Cuppini2017 expects exactly 2 stimuli (one visual "
                 f"and one auditory), but {len(modalities)} were received."
             )
-        if set(modalities) != {"visual", "auditory"}:
+        if set(modalities) != {self.mode0, self.mode1}:
             raise ValueError(
-                "Cuppini2017 expects exactly one visual stimulus and "
-                f"one auditory one. Received: {modalities}."
+                f"Cuppini2017 expects one {self.mode0!r} and one "
+                f"{self.mode1!r} signal. Received: {modalities}."
             )
 
-    def get_conf(self):
+    def get_connectivity(self):
 
         # --- Lateral connectivity (Mexican Hat), within each layer ---
         mode0_latsynapses = self.calculate_lateral_synapses(
@@ -126,16 +130,27 @@ class Cuppini2017(Integrator):
         )
 
         return {
-            "mode0_latsynapses": mode0_latsynapses,
-            "mode1_latsynapses": mode1_latsynapses,
-            "multi_latsynapses": multi_latsynapses,
-            "mode0_to_mode1_synapses": mode0_to_mode1_synapses,
-            "mode1_to_mode0_synapses": mode1_to_mode0_synapses,
-            "mode0_to_multi_synapses": mode0_to_multi_synapses,
-            "mode1_to_multi_synapses": mode1_to_multi_synapses,
+            "lateral": {
+                self.mode0: mode0_latsynapses,
+                self.mode1: mode1_latsynapses,
+                "multi": multi_latsynapses,
+            },
+            "cross_modal": {
+                (self.mode0, self.mode1): mode0_to_mode1_synapses,
+                (self.mode1, self.mode0): mode1_to_mode0_synapses,
+            },
+            "feedforward": {
+                self.mode0: mode0_to_multi_synapses,
+                self.mode1: mode1_to_multi_synapses,
+            },
         }
-        
-    def integrate(self, signal_1, signal_2, time_range, time_res, random):
+
+    def integrate(self, signals, time_range, time_res, random):
+
+        # Connectivity is part of the network, so the integrator owns it.
+        connectivity = self.get_connectivity()
+        mode0_signal = signals[self.mode0]
+        mode1_signal = signals[self.mode1]
 
         hist_times = np.arange(
                             time_range[0], time_range[1], time_res
@@ -160,41 +175,43 @@ class Cuppini2017(Integrator):
         for i in range(n_time_steps):
             # Cross-modal input (via Wva, Wav)
             mode0_cm_input = np.sum(
-                signal_1.crossmodal_synapses * mode1_y, axis=1
+                connectivity["cross_modal"][(self.mode1, self.mode0)]
+                * mode1_y, axis=1
             )
             mode1_cm_input = np.sum(
-                signal_2.crossmodal_synapses * mode0_y, axis=1
+                connectivity["cross_modal"][(self.mode0, self.mode1)]
+                * mode0_y, axis=1
             )
 
             # Feedforward input to the multisensory layer
             multi_input = (
-                np.sum(signal_1.feedforward_synapses * mode0_y, axis=1)
-                + np.sum(signal_2.feedforward_synapses * mode1_y, axis=1)
+                np.sum(connectivity["feedforward"][self.mode0] * mode0_y, axis=1)
+                + np.sum(connectivity["feedforward"][self.mode1] * mode1_y, axis=1)
             )
 
             # External (stimulus) + cross-modal input
-            mode0_input = signal_1.unimodal_matrix[i] + mode0_cm_input
-            mode1_input = signal_2.unimodal_matrix[i] + mode1_cm_input
+            mode0_input = mode0_signal.values[i] + mode0_cm_input
+            mode1_input = mode1_signal.values[i] + mode1_cm_input
 
             # Noise, if enabled
             if self.noise:
                 mode0_noise = -(
-                    signal_1.payload.intensity * self.noise_level
+                    np.max(mode0_signal.values) * self.noise_level
                 ) + (
-                    2 * signal_1.payload.intensity * self.noise_level
+                    2 * np.max(mode0_signal.values) * self.noise_level
                 ) * random.random(self.neurons)
                 mode1_noise = -(
-                    signal_2.payload.intensity * self.noise_level
+                    np.max(mode1_signal.values) * self.noise_level
                 ) + (
-                    2 * signal_2.payload.intensity * self.noise_level
+                    2 * np.max(mode1_signal.values) * self.noise_level
                 ) * random.random(self.neurons)
                 mode0_input = mode0_input + mode0_noise
                 mode1_input = mode1_input + mode1_noise
 
             # Lateral input (Mexican Hat), within each layer
-            la = np.sum(signal_1.latsynapses * mode0_y, axis=1)
-            lv = np.sum(signal_2.latsynapses * mode1_y, axis=1)
-            lm = np.sum(signal_1.multi_latsynapses * multi_y, axis=1)
+            la = np.sum(connectivity["lateral"][self.mode0] * mode0_y, axis=1)
+            lv = np.sum(connectivity["lateral"][self.mode1] * mode1_y, axis=1)
+            lm = np.sum(connectivity["lateral"]["multi"] * multi_y, axis=1)
 
             # Total input per layer
             u_a = la + mode0_input
@@ -217,17 +234,11 @@ class Cuppini2017(Integrator):
             multi_res[i, :] = multi_y
 
         response = {
-            "mode0": mode0_res,
-            "mode1": mode1_res,
+            self.mode0: mode0_res,
+            self.mode1: mode1_res,
             "multi": multi_res,
         }
-        extra = {
-            "stim_position": [
-                signal_1.payload.position,
-                signal_2.payload.position,
-            ],
-        }
-        return response, extra
+        return response, {}
 
     def calculate_causes(
         self,
@@ -250,4 +261,3 @@ class Cuppini2017(Integrator):
             time_point=-1,
             spatial_point=position,
         )
-

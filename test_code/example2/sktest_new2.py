@@ -14,7 +14,7 @@ brain = Cuppini2017(
     neurons=90,
 )
 
-model = Backend(stimuli=[eyes, ears], 
+model = Backend(stimuli=[ears, eyes], 
                 integrator=brain, 
                 causes_kind="count",
                 causes_dim="space",

@@ -23,7 +23,7 @@ brain = Cuppini2017(
 )
 
 # --- 3. Wiring: conecta estimulos <-> integrador -----------------------
-model = Backend(stimuli=[eyes, ears], 
+model = Backend(stimuli=[ears, eyes], 
                 integrator=brain, 
                 seed=42,
                 time_range=(0, 100),

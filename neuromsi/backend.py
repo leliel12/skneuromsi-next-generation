@@ -12,13 +12,6 @@ class Backend:
     connects and to orchestrate the run.
     """
 
-    # Preferred input order, keyed by integrator class name. Extend this
-    # dict when adding new architectures; integrators not listed here
-    # keep the stimuli in the order they were given.
-    expected_input_order = {
-        "Cuppini2017": ("auditory", "visual"),
-    }
-
     def __init__(
         self,
         stimuli,
@@ -38,10 +31,9 @@ class Backend:
         Parameters
         ----------
         stimuli : list of Stimulus
-            The stimuli to connect, in any order. ``order_stims()``
-            reorders them into the input order the integrator expects.
+            The stimuli to connect, in any order.
         integrator : object
-            Implements `.get_conf()`, `.check_stimuli_compatible(...)`,
+            Implements `.check_stimuli_compatible(...)`,
             `.execute(...)` and `.calculate_causes(...)`.
         position_range : (float, float), optional
             The (min, max) position covered by the integrator neurons, in
@@ -68,24 +60,6 @@ class Backend:
         self.random = np.random.default_rng(seed=seed)
 
         self._check_position_range()
-
-    def order_stims(self):
-        """
-        Reorders the stimuli into the input order the integrator expects.
-
-        Looks up ``expected_input_order`` by the integrator class name. If
-        the integrator is not listed there, or a listed modality is
-        missing from the stimuli, the original order is kept.
-        """
-        order = self.expected_input_order.get(type(self.integrator).__name__)
-        if order is None:
-            return self.stimuli
-
-        by_modality = {stim.modality: stim for stim in self.stimuli}
-        try:
-            return tuple(by_modality[modality] for modality in order)
-        except KeyError:
-            return self.stimuli
 
     def _check_position_range(self):
         """
@@ -123,38 +97,34 @@ class Backend:
         """
         Runs the simulation and returns its result.
 
-        Validates the stimuli, asks the integrator for its configuration,
-        generates a signal per stimulus, runs the integration, and delegates
-        the packaging of the result to ``make_ndresult``.
+        Validates stimuli, encodes one sensory signal per modality, runs
+        the integration, and delegates result packaging to ``make_ndresult``.
         """
 
         self.integrator.check_stimuli_compatible(
             [stim.modality for stim in self.stimuli]
         )
         
-        stimuli = self.order_stims()
-        intg_conf = self.integrator.get_conf()
-
-        signals = []
-        for idx, stim in enumerate(stimuli):
-            signals.append(
-                stim.generate_signal(
-                    config=intg_conf,
-                    mode=idx,
-                    neurons=self.integrator.neurons,
-                    simulation_length=self.time_range[1],
-                    time_res=self.time_res,
-                )
+        signals = {
+            stim.modality: stim.generate_signal(
+                neurons=self.integrator.neurons,
+                simulation_length=self.time_range[1],
+                time_res=self.time_res,
             )
+            for stim in self.stimuli
+        }
 
         response, extra = self.integrator.execute(
-            *signals,
+            signals,
             time_range=self.time_range,
             time_res=self.time_res,
             random=self.random,
         )
 
-        return self.make_ndresult(response, extra, stimuli)
+        # Keep experiment descriptors outside the encoded sensory signals.
+        extra["stim_position"] = [stim.position for stim in self.stimuli]
+
+        return self.make_ndresult(response, extra, self.stimuli)
 
     def make_ndresult(self, response, extra, stimuli):
         """
@@ -168,15 +138,14 @@ class Backend:
         Parameters
         ----------
         response : dict
-            The raw response of the integrator, keyed by 'mode0', 'mode1',
-            'multi', etc.
+            The raw response of the integrator, keyed by modality and
+            ``multi``.
         extra : dict
             Extra information reported by the integrator. It is updated in
             place with the causes parameters used for this run.
         stimuli : tuple of Stimulus
-            The stimuli in the same order in which they were given to the
-            integrator, i.e. the 'idx'-th one produced the 'mode{idx}'
-            entry of 'response'.
+            The original stimuli, used to label the result and record the
+            experimental parameters.
 
         Returns
         -------
@@ -190,12 +159,8 @@ class Backend:
             "causes_peak_distance": self.causes_peak_distance,
         })
 
-        # replace the generic mode names of the integrator by the real
-        # modality of the stimulus that fed each unisensory layer
-        modes = {
-            stim.modality: response[f"mode{idx}"]
-            for idx, stim in enumerate(stimuli)
-        }
+        # Keep each unisensory response under its modality name.
+        modes = {stim.modality: response[stim.modality] for stim in stimuli}
         modes["multi"] = response["multi"]
 
         causes = self.calculate_causes(response, extra)
