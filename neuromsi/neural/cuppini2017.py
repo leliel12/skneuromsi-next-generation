@@ -74,6 +74,29 @@ class Cuppini2017(Integrator):
         self.noise = noise
         self.noise_level = noise_level
 
+    @property
+    def model_parameters(self):
+        """dict: Every parameter that defines this architecture.
+
+        Reported by the Backend in the run parameters of the result, so
+        a simulation can be reproduced from its NDResult.
+        """
+        return {
+            "neurons": self.neurons,
+            "mode0": self.mode0,
+            "mode1": self.mode1,
+            "tau": self.tau,
+            "s": self.s,
+            "theta": self.theta,
+            "cross_modal_weight": self.cross_modal_weight,
+            "cross_modal_sigma": self.cross_modal_sigma,
+            "feedforward_weight": self.feedforward_weight,
+            "feedforward_sigma": self.feedforward_sigma,
+            "lateral_params": self.lateral_params,
+            "noise": self.noise,
+            "noise_level": self.noise_level,
+        }
+
     def sigmoid(self, u):
         """Sigmoid activation function F(u), shared by the 3 layers."""
         return 1 / (1 + np.exp(-self.s * (u - self.theta)))
@@ -145,7 +168,9 @@ class Cuppini2017(Integrator):
             },
         }
 
-    def integrate(self, signals, time_range, time_res, random):
+    def integrate(
+        self, signals, time_range, time_res, random, **kwargs
+    ):
 
         # Connectivity is part of the network, so the integrator owns it.
         connectivity = self.get_connectivity()

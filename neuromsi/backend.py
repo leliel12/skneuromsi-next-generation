@@ -70,6 +70,10 @@ class Backend:
         range describes at 'position_res'. Checking it here avoids running
         the whole simulation only to fail when building the result.
 
+        Models without neurons (e.g. Bayesian models, whose grid is defined
+        by 'position_range' and 'position_res' alone) are skipped; NDResult
+        validates the grid when the result is built.
+
         Raises
         ------
         ValueError
@@ -83,7 +87,10 @@ class Backend:
                 f"The position_range must be (min, max). Got {prange}"
             )
 
-        neurons = self.integrator.neurons
+        neurons = getattr(self.integrator, "neurons", None)
+        if neurons is None:
+            return
+
         expected = int(abs(prange[1] - prange[0]) / self.position_res) or 1
         if expected != neurons:
             raise ValueError(
@@ -92,6 +99,52 @@ class Backend:
                 f"but the integrator has {neurons} neurons. "
                 f"Set position_range=(0, {neurons * self.position_res})"
             )
+
+    def generate_signals(self):
+        """
+        Encodes every stimulus as the signal its model consumes.
+
+        The model type decides the encoding: neural models receive a
+        time-by-neuron matrix per modality, Bayesian models receive the
+        stimulus variance and the unisensory measurement drawn from it.
+
+        Returns
+        -------
+        dict
+            One signal per stimulus, keyed by modality.
+
+        Raises
+        ------
+        ValueError
+            If the model does not declare a known ``model_type``.
+
+        """
+        model_type = getattr(self.integrator, "model_type", None)
+
+        if model_type == "Bayesian":
+            return {
+                stim.modality: stim.generate_bayesian_signal(
+                    n=self.integrator.n_sim,
+                    noise=self.integrator.noise,
+                    random=self.random,
+                )
+                for stim in self.stimuli
+            }
+
+        if model_type == "Neural":
+            return {
+                stim.modality: stim.generate_neural_signal(
+                    neurons=self.integrator.neurons,
+                    simulation_length=self.time_range[1],
+                    time_res=self.time_res,
+                )
+                for stim in self.stimuli
+            }
+
+        raise ValueError(
+            f"Unknown model_type {model_type!r}. Expected 'Neural' or "
+            f"'Bayesian'. Got {model_type!r}."
+        )
 
     def run(self):
         """
@@ -104,20 +157,15 @@ class Backend:
         self.integrator.check_stimuli_compatible(
             [stim.modality for stim in self.stimuli]
         )
-        
-        signals = {
-            stim.modality: stim.generate_signal(
-                neurons=self.integrator.neurons,
-                simulation_length=self.time_range[1],
-                time_res=self.time_res,
-            )
-            for stim in self.stimuli
-        }
+
+        signals = self.generate_signals()
 
         response, extra = self.integrator.execute(
             signals,
             time_range=self.time_range,
             time_res=self.time_res,
+            position_range=self.position_range,
+            position_res=self.position_res,
             random=self.random,
         )
 
@@ -184,9 +232,15 @@ class Backend:
             },
         }
 
+        # The architecture parameters are part of the experiment: without
+        # them the result cannot be reproduced.
+        model_parameters = getattr(self.integrator, "model_parameters", None)
+        if model_parameters:
+            run_parameters["model"] = dict(model_parameters)
+
         return NDResult.from_modes_dict(
             mname=type(self.integrator).__name__,
-            mtype="integrator",
+            mtype=self.integrator.model_type,
             output_mode="multi",
             nmap={mode: mode for mode in modes},
             modes_dict=modes,
@@ -201,4 +255,6 @@ class Backend:
 
     def calculate_causes(self, response, extra):
         """Shortcut to call integrator.calculate_causes(...)."""
-        return self.integrator.calculate_causes(multi=response["multi"], **extra)
+        return self.integrator.calculate_causes(
+            multi=response["multi"], **extra
+        )

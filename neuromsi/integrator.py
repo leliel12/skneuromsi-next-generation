@@ -15,6 +15,10 @@ class Integrator:
     parameters, dynamics and causal-inference mechanism.
     """
 
+    #: What kind of signal this model consumes. The Backend reads it to
+    #: decide how the stimuli must be encoded. Subclasses override it.
+    model_type = "Neural"
+
     def calculate_lateral_synapses(
         self,
         neurons,
@@ -117,7 +121,7 @@ class Integrator:
         for modality, signal in signals.items():
             if modality != signal.modality:
                 raise ValueError(
-                    f"Signal key {modality!r} does not match its modality "
+                    f"NeuralSignal key {modality!r} does not match its modality "
                     f"{signal.modality!r}."
                 )
         self.check_stimuli_compatible(signals.keys())

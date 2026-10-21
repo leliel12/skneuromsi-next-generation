@@ -2,7 +2,7 @@ import numpy as np
 
 from neuromsi.utils.neural_tools import calculate_neural_distance
 
-from .signal import Signal
+from .signal import BayesianSignal, NeuralSignal
 
 
 class Stimulus:
@@ -195,7 +195,41 @@ class Stimulus:
 
         return stimuli_matrix
 
-    def generate_signal(
+    def input_computation(self, noise, n, random):
+        """Draws one unisensory measurement of this stimulus.
+
+        This is the measurement a Bayesian causal-inference model works
+        with: the true stimulus position plus a Gaussian draw whose scale
+        is the stimulus uncertainty. It belongs to the stimulus because
+        it only depends on where the stimulus is and how uncertain it is;
+        ``noise``, the number of simulations and the random generator
+        come from the model / backend that asks for it.
+
+        Parameters
+        ----------
+        noise : bool
+            Whether to include noise in the computation. If False, a
+            fixed one-standard-deviation offset is used instead of a
+            random draw.
+        n : int
+            Number of simulations (one independent draw each).
+        random : numpy.random.Generator
+            The random number generator used for the draws.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            The computed input: a scalar when ``noise`` is False,
+            an array of ``n`` values otherwise.
+        """
+        unisensory_var = np.square(self.sigma)
+        if noise is False:
+            return self.position + np.sqrt(unisensory_var)
+        return self.position + np.sqrt(unisensory_var) * random.standard_normal(
+            n
+        )
+
+    def generate_neural_signal(
         self,
         neurons,
         simulation_length,
@@ -218,7 +252,7 @@ class Stimulus:
 
         Returns
         -------
-        Signal
+        NeuralSignal
             The signal ready to be integrated.
         """
         values = self.create_unimodal_stimuli_matrix(
@@ -228,7 +262,39 @@ class Stimulus:
             dtype=dtype,
         )
 
-        return Signal(modality=self.modality, values=values)
+        return NeuralSignal(modality=self.modality, values=values)
+
+    # Backwards-compatible alias of the neural encoder.
+    generate_signal = generate_neural_signal
+
+    def generate_bayesian_signal(self, n, noise, random):
+        """
+        Encodes this stimulus as a measurement for a Bayesian model.
+
+        Instead of a time-by-neuron matrix, a Bayesian model consumes the
+        stimulus variance and the unisensory input drawn from it
+        (``input_computation``).
+
+        Parameters
+        ----------
+        n : int
+            Number of simulations of the model.
+        noise : bool
+            Whether to include noise in the input computation.
+        random : numpy.random.Generator
+            The random number generator used for the draws.
+
+        Returns
+        -------
+        BayesianSignal
+            The measurement ready to be used by the model.
+        """
+        values = {
+            "var": float(np.square(self.sigma)),
+            "input": self.input_computation(noise, n, random),
+        }
+
+        return BayesianSignal(modality=self.modality, values=values)
 
     @classmethod
     def get_stimuli(cls, position):
