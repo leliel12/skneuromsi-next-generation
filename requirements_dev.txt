@@ -21,6 +21,6 @@ pytest-cov
 pydocstyle
 tomli
 
--r docs/requirements.txt
+# -r docs/requirements.txt
 
 https://github.com/quatrope/qafan/archive/refs/heads/master.zip

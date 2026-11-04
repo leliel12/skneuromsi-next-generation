@@ -19,7 +19,7 @@ class Integrator:
     #: decide how the stimuli must be encoded. Subclasses override it.
     model_type = "Neural"
 
-    def calculate_lateral_synapses(
+    def _calculate_lateral_synapses(
         self,
         neurons,
         excitation_loc,
@@ -74,7 +74,7 @@ class Integrator:
                 the_lateral_synapses[neuron_i, neuron_j] = e_gauss - i_gauss
         return the_lateral_synapses
 
-    def calculate_inter_areal_synapses(
+    def _calculate_inter_areal_synapses(
         self, neurons, weight, sigma, dtype=np.float32
     ):
         """

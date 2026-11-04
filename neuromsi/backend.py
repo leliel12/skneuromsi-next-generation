@@ -100,7 +100,7 @@ class Backend:
                 f"Set position_range=(0, {neurons * self.position_res})"
             )
 
-    def generate_signals(self):
+    def _generate_signals(self):
         """
         Encodes every stimulus as the signal its model consumes.
 
@@ -146,35 +146,7 @@ class Backend:
             f"'Bayesian'. Got {model_type!r}."
         )
 
-    def run(self):
-        """
-        Runs the simulation and returns its result.
-
-        Validates stimuli, encodes one sensory signal per modality, runs
-        the integration, and delegates result packaging to ``make_ndresult``.
-        """
-
-        self.integrator.check_stimuli_compatible(
-            [stim.modality for stim in self.stimuli]
-        )
-
-        signals = self.generate_signals()
-
-        response, extra = self.integrator.execute(
-            signals,
-            time_range=self.time_range,
-            time_res=self.time_res,
-            position_range=self.position_range,
-            position_res=self.position_res,
-            random=self.random,
-        )
-
-        # Keep experiment descriptors outside the encoded sensory signals.
-        extra["stim_position"] = [stim.position for stim in self.stimuli]
-
-        return self.make_ndresult(response, extra, self.stimuli)
-
-    def make_ndresult(self, response, extra, stimuli):
+    def _make_ndresult(self, response, extra, stimuli):
         """
         Builds the NDResult of the run out of the integrator response.
 
@@ -211,7 +183,7 @@ class Backend:
         modes = {stim.modality: response[stim.modality] for stim in stimuli}
         modes["multi"] = response["multi"]
 
-        causes = self.calculate_causes(response, extra)
+        causes = self._calculate_causes(response, extra)
         run_parameters = {
             "seed": self.seed,
             "time_range": self.time_range,
@@ -253,8 +225,36 @@ class Backend:
             extra=extra,
         )
 
-    def calculate_causes(self, response, extra):
+    def _calculate_causes(self, response, extra):
         """Shortcut to call integrator.calculate_causes(...)."""
         return self.integrator.calculate_causes(
             multi=response["multi"], **extra
         )
+
+    def run(self):
+        """
+        Runs the simulation and returns its result.
+
+        Validates stimuli, encodes one sensory signal per modality, runs
+        the integration, and delegates result packaging to ``_make_ndresult``.
+        """
+
+        self.integrator.check_stimuli_compatible(
+            [stim.modality for stim in self.stimuli]
+        )
+
+        signals = self._generate_signals()
+
+        response, extra = self.integrator.execute(
+            signals,
+            time_range=self.time_range,
+            time_res=self.time_res,
+            position_range=self.position_range,
+            position_res=self.position_res,
+            random=self.random,
+        )
+
+        # Keep experiment descriptors outside the encoded sensory signals.
+        extra["stim_position"] = [stim.position for stim in self.stimuli]
+
+        return self._make_ndresult(response, extra, self.stimuli)

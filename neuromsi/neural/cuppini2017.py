@@ -118,35 +118,35 @@ class Cuppini2017(Integrator):
     def get_connectivity(self):
 
         # --- Lateral connectivity (Mexican Hat), within each layer ---
-        mode0_latsynapses = self.calculate_lateral_synapses(
+        mode0_latsynapses = self._calculate_lateral_synapses(
             neurons=self.neurons, **self.lateral_params["mode0"]
         )
-        mode1_latsynapses = self.calculate_lateral_synapses(
+        mode1_latsynapses = self._calculate_lateral_synapses(
             neurons=self.neurons, **self.lateral_params["mode1"]
         )
-        multi_latsynapses = self.calculate_lateral_synapses(
+        multi_latsynapses = self._calculate_lateral_synapses(
             neurons=self.neurons, **self.lateral_params["multi"]
         )
 
         # --- Cross-modal synapses (Wav, Wva) ---
-        mode0_to_mode1_synapses = self.calculate_inter_areal_synapses(
+        mode0_to_mode1_synapses = self._calculate_inter_areal_synapses(
             neurons=self.neurons,
             weight=self.cross_modal_weight,
             sigma=self.cross_modal_sigma,
         )
-        mode1_to_mode0_synapses = self.calculate_inter_areal_synapses(
+        mode1_to_mode0_synapses = self._calculate_inter_areal_synapses(
             neurons=self.neurons,
             weight=self.cross_modal_weight,
             sigma=self.cross_modal_sigma,
         )
 
         # --- Feedforward synapses to the multisensory layer (Wma, Wmv) ---
-        mode0_to_multi_synapses = self.calculate_inter_areal_synapses(
+        mode0_to_multi_synapses = self._calculate_inter_areal_synapses(
             neurons=self.neurons,
             weight=self.feedforward_weight,
             sigma=self.feedforward_sigma,
         )
-        mode1_to_multi_synapses = self.calculate_inter_areal_synapses(
+        mode1_to_multi_synapses = self._calculate_inter_areal_synapses(
             neurons=self.neurons,
             weight=self.feedforward_weight,
             sigma=self.feedforward_sigma,

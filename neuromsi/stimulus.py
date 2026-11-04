@@ -12,8 +12,8 @@ class Stimulus:
 
     It only describes "what happened in the world": where, how strong, how
     uncertain it is, and when. It also knows how to render itself as a
-    neural input (``calculate_stimuli_input`` and
-    ``create_unimodal_stimuli_matrix``), but it knows nothing about the
+    neural input (``_calculate_stimuli_input`` and
+    ``_create_unimodal_stimuli_matrix``), but it knows nothing about the
     integration dynamics or the connectivity of the network that will
     consume it.
     """
@@ -72,7 +72,7 @@ class Stimulus:
             f"stim_n={self.stim_n}, soa={self.soa})"
         )
 
-    def calculate_stimuli_input(self, neurons, dtype=np.float32):
+    def _calculate_stimuli_input(self, neurons, dtype=np.float32):
         """
         Renders this stimulus as a spatial input Gaussian.
 
@@ -95,20 +95,26 @@ class Stimulus:
         the_stimuli = np.zeros(neurons, dtype=dtype)
 
         for neuron_j in range(neurons):
-            distance = calculate_neural_distance(neurons, neuron_j, self.position)
+            distance = calculate_neural_distance(
+                neurons, neuron_j, self.position
+            )
             the_stimuli[neuron_j] = self.intensity * np.exp(
                 -(np.square(distance)) / (2 * np.square(self.sigma))
             )
 
         return the_stimuli
 
-    def create_unimodal_stimuli_matrix(
-        self, neurons, simulation_length, time_res, duration=None, dtype=np.float32
+    def _create_unimodal_stimuli_matrix(
+        self,
+        neurons,
+        simulation_length,
+        time_res,
+        dtype=np.float32,
     ):
         """
         Builds the temporal input matrix of this stimulus.
 
-        Combines the spatial input (``calculate_stimuli_input``) with the
+        Combines the spatial input (``_calculate_stimuli_input``) with the
         stimulus timing (onset, duration, repetitions and SOA) to produce
         the activation matrix (times x neurons) that the integrator
         consumes.
@@ -121,10 +127,6 @@ class Stimulus:
             Total duration of the simulation in time units.
         time_res : float
             Temporal resolution of the simulation (integration step).
-        duration : float or None, optional
-            Effective duration of the stimulus. If None, the stimulus's
-            own duration is used, and if that is also undefined, the
-            stimulus is assumed to last the whole simulation.
         dtype : numpy class, optional
             Data type of the resulting array. Default np.float32.
 
@@ -143,22 +145,28 @@ class Stimulus:
         stimuli_n = int(self.stim_n)
         soa = self.soa
 
-        if duration is None:
-            duration = self.duration if self.duration is not None else simulation_length
+        duration = (
+            self.duration if self.duration is not None else simulation_length
+        )
 
         if duration * stimuli_n > simulation_length:
-            raise ValueError("Stimuli total duration exceeds simulation length.")
+            raise ValueError(
+                "Stimuli total duration exceeds simulation length."
+            )
 
         if soa is not None:
             soa = int(soa)
-            if duration * stimuli_n + soa * (stimuli_n - 1) > simulation_length:
+            if (
+                duration * stimuli_n + soa * (stimuli_n - 1)
+                > simulation_length
+            ):
                 raise ValueError(
                     "Stimuli total duration exceeds simulation length."
                 )
             if soa < duration:
                 raise ValueError("SOA must be longer than stimulus duration.")
 
-        stimuli = self.calculate_stimuli_input(neurons, dtype=dtype)
+        stimuli = self._calculate_stimuli_input(neurons, dtype=dtype)
         no_stim = np.zeros(neurons, dtype=dtype)
 
         if stimuli_n == 0:
@@ -174,9 +182,7 @@ class Stimulus:
 
         # Input during onset asynchrony
         soa_stim = (
-            np.tile(no_stim, (soa - duration, 1))
-            if soa is not None
-            else None
+            np.tile(no_stim, (soa - duration, 1)) if soa is not None else None
         )
 
         # Input after stimulation
@@ -195,7 +201,7 @@ class Stimulus:
 
         return stimuli_matrix
 
-    def input_computation(self, noise, n, random):
+    def _draw_measurement(self, *, noise, n, random):
         """Draws one unisensory measurement of this stimulus.
 
         This is the measurement a Bayesian causal-inference model works
@@ -225,9 +231,9 @@ class Stimulus:
         unisensory_var = np.square(self.sigma)
         if noise is False:
             return self.position + np.sqrt(unisensory_var)
-        return self.position + np.sqrt(unisensory_var) * random.standard_normal(
-            n
-        )
+        return self.position + np.sqrt(
+            unisensory_var
+        ) * random.standard_normal(n)
 
     def generate_neural_signal(
         self,
@@ -255,7 +261,7 @@ class Stimulus:
         NeuralSignal
             The signal ready to be integrated.
         """
-        values = self.create_unimodal_stimuli_matrix(
+        values = self._create_unimodal_stimuli_matrix(
             neurons=neurons,
             simulation_length=simulation_length,
             time_res=time_res,
@@ -264,16 +270,13 @@ class Stimulus:
 
         return NeuralSignal(modality=self.modality, values=values)
 
-    # Backwards-compatible alias of the neural encoder.
-    generate_signal = generate_neural_signal
-
     def generate_bayesian_signal(self, n, noise, random):
         """
         Encodes this stimulus as a measurement for a Bayesian model.
 
         Instead of a time-by-neuron matrix, a Bayesian model consumes the
         stimulus variance and the unisensory input drawn from it
-        (``input_computation``).
+        (``_draw_measurement``).
 
         Parameters
         ----------
@@ -291,33 +294,10 @@ class Stimulus:
         """
         values = {
             "var": float(np.square(self.sigma)),
-            "input": self.input_computation(noise, n, random),
+            "input": self._draw_measurement(noise=noise, n=n, random=random),
         }
 
         return BayesianSignal(modality=self.modality, values=values)
-
-    @classmethod
-    def get_stimuli(cls, position):
-        """
-        Returns an instance of the class with default values.
-
-        Parameters
-        ----------
-        position : float
-            Spatial position of the stimulus, in degrees.
-
-        Returns
-        -------
-        Stimulus
-            A stimulus at 'position' and default values elsewhere.
-        """
-        return cls(
-            position=position,
-            intensity=27,
-            sigma=4,
-            onset=0,
-            duration=100,
-        )
 
 
 class Visual(Stimulus):
@@ -325,27 +305,23 @@ class Visual(Stimulus):
 
     modality = "visual"
 
-    @classmethod
-    def get_stimuli(cls, position):
-        """
-        Returns a visual stimulus with the default values.
-
-        Parameters
-        ----------
-        position : float
-            Spatial position of the stimulus, in degrees.
-
-        Returns
-        -------
-        Visual
-            A visual stimulus at 'position' and default values elsewhere.
-        """
-        return cls(
-            position=position,
-            intensity=27,
-            sigma=4,
-            onset=0,
-            duration=100,
+    def __init__(
+        self,
+        position,
+        *,
+        intensity=27,
+        sigma=4,
+        onset=0,
+        duration=100,
+        **kwargs,
+    ):
+        super().__init__(
+            position,
+            intensity=intensity,
+            sigma=sigma,
+            onset=onset,
+            duration=duration,
+            **kwargs,
         )
 
 
@@ -354,25 +330,21 @@ class Audio(Stimulus):
 
     modality = "auditory"
 
-    @classmethod
-    def get_stimuli(cls, position):
-        """
-        Returns an auditory stimulus with the default values.
-
-        Parameters
-        ----------
-        position : float
-            Spatial position of the stimulus, in degrees.
-
-        Returns
-        -------
-        Audio
-            An auditory stimulus at 'position' and default values elsewhere.
-        """
-        return cls(
-            position=position,
-            intensity=28,
-            sigma=32,
-            onset=0,
-            duration=100,
+    def __init__(
+        self,
+        position,
+        *,
+        intensity=28,
+        sigma=32,
+        onset=0,
+        duration=100,
+        **kwargs,
+    ):
+        super().__init__(
+            position,
+            intensity=intensity,
+            sigma=sigma,
+            onset=onset,
+            duration=duration,
+            **kwargs,
         )
