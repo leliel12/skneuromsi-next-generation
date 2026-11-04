@@ -1,3 +1,5 @@
+"""Backend: runs an experiment by connecting stimuli with an integrator."""
+
 import numpy as np
 
 from neuromsi.core import NDResult
@@ -10,6 +12,25 @@ class Backend:
     "auditory", "visual"). It has no architecture parameters of its own:
     its only responsibility is to know "who is who" among the pieces it
     connects and to orchestrate the run.
+
+    A run goes from the description of the world to the result of the
+    model: the stimuli encode themselves as signals, the integrator turns
+    the signals into a response, and the Backend packs everything in an
+    :class:`~neuromsi.core.NDResult`. The same Backend works with neural and
+    Bayesian models, as it reads the ``model_type`` of the integrator to
+    decide how the stimuli must be encoded.
+
+    Examples
+    --------
+    >>> from neuromsi import Audio, Visual, Backend, Cuppini2017
+    >>> backend = Backend(
+    ...     stimuli=[Audio(position=60), Visual(position=70)],
+    ...     integrator=Cuppini2017(),
+    ...     time_range=(0, 150),
+    ...     time_res=0.5,
+    ...     seed=42,
+    ... )
+    >>> result = backend.run()
     """
 
     def __init__(
@@ -233,18 +254,45 @@ class Backend:
 
     def run(self):
         """
-        Runs the simulation and returns its result.
+        Runs the experiment and returns its result.
 
-        Validates stimuli, encodes one sensory signal per modality, runs
-        the integration, and delegates result packaging to ``_make_ndresult``.
+        The run goes through four steps:
+
+        1. The integrator checks that the modalities of the stimuli are
+           compatible with the model.
+        2. Each stimulus is encoded as the signal the model consumes (a
+           time-by-neuron matrix for neural models, a variance and a
+           measurement for Bayesian ones).
+        3. The integrator processes the signals over the configured time
+           and position grids.
+        4. The response is packed, together with the causes, the run
+           parameters and the position of each stimulus, into an NDResult.
+
+        Returns
+        -------
+        NDResult
+            The result of the run, with one response per modality plus the
+            multisensory one (``multi``).
+
+        Raises
+        ------
+        ValueError
+            If the stimuli are not compatible with the integrator, or if
+            the integrator does not declare a known ``model_type``.
+
         """
-
+        # 1. Fail early, before encoding anything, if the model cannot
+        #    handle the modalities of the stimuli.
         self.integrator.check_stimuli_compatible(
             [stim.modality for stim in self.stimuli]
         )
 
+        # 2. Encode each stimulus as the signal this model consumes,
+        #    keyed by modality.
         signals = self._generate_signals()
 
+        # 3. Integrate the signals. The backend shares its random generator
+        #    so the whole run is reproducible from a single seed.
         response, extra = self.integrator.execute(
             signals,
             time_range=self.time_range,
@@ -257,4 +305,7 @@ class Backend:
         # Keep experiment descriptors outside the encoded sensory signals.
         extra["stim_position"] = [stim.position for stim in self.stimuli]
 
-        return self._make_ndresult(response, extra, self.stimuli)
+        # 4. Pack the response, causes and run parameters into the result.
+        ndresult =self._make_ndresult(response, extra, self.stimuli)
+
+        return ndresult

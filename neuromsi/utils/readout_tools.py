@@ -31,7 +31,7 @@ from scipy.signal import find_peaks
 
 def calculate_multiple_peaks_probability(peaks_values):
     """
-    Computes the probability of reading out multiple stimuli from the ouput.
+    Computes the probability of reading out multiple stimuli from the output.
 
     The probability of perceiving two stimuli is defined as the product of
     the two peak values. When more than two peak values are provided, the
@@ -70,7 +70,7 @@ def calculate_multiple_peaks_probability(peaks_values):
 
 def calculate_single_peak_probability(peaks_values):
     """
-    Computes the probability of reading a unique stimulus from the model ouput.
+    Computes the probability of reading a unique stimulus from the model output.
 
     The probability of perceiving one stimulus is defined as the single peak
     value. When two or more peak values are provided, the complementary
@@ -117,9 +117,10 @@ def calculate_causes_from_peaks(
     """
     Computes the number of causes from peaks found in modal activity.
 
-    The peaks are identified using the peakdetect method. The algorithm
-    requires to set the lookahead parameter, which is the distance to look
-    ahead from a peak candidate to determine if it is the actual peak.
+    The peaks are identified with :func:`scipy.signal.find_peaks`. A peak
+    must be at least ``peak_threshold`` high and stand out from its
+    surroundings by at least ``peak_threshold`` (prominence), so small
+    ripples of the activity are not counted as causes.
 
     Parameters
     ----------
@@ -131,7 +132,10 @@ def calculate_causes_from_peaks(
         - 'count' : counts the number of peaks (default)
         - 'prob' : takes the height of the peaks as probability values.
     peak_threshold : float
-        The minimum peak height to detect peaks.
+        The minimum height and prominence of a peak.
+    peak_distance : int or None
+        The minimum distance (in samples) between two consecutive peaks.
+        If None, there is no minimum.
 
     Returns
     -------
@@ -175,9 +179,9 @@ def calculate_spatiotemporal_causes_from_peaks(
     """
     Computes the number of causes from peaks found in modal activity.
 
-    The peaks are identified using the peakdetect method. The algorithm
-    requires to set the lookahead parameter, which is the distance to look
-    ahead from a peak candidate to determine if it is the actual peak.
+    Takes a one-dimensional slice of the activity of a mode (the spatial
+    profile at one time, or the temporal profile at one position) and
+    counts its peaks with :func:`calculate_causes_from_peaks`.
 
     Parameters
     ----------
@@ -193,18 +197,20 @@ def calculate_spatiotemporal_causes_from_peaks(
         - 'space' : reads causes from spatial dimension (default).
         - 'time' : reads causes from temporal dimension.
     time_point: int
-        The temporal point where spatial readout is computed.
-    position_point: int
+        The temporal point where spatial readout is computed. Default -1
+        (the last time step).
+    spatial_point: int
         The spatial point where temporal readout is computed.
     peak_threshold : float
-        The minimum persistence score to detect peaks.
-    lookahead: int
-        The distance to look ahead from a peak candidate.
+        The minimum height and prominence of a peak.
+    peak_distance : int or None
+        The minimum distance (in samples) between two consecutive peaks.
 
     Returns
     -------
-    numpy.float64
-        Causes identified from modal activity in the desired dimension.
+    numpy.float64 or None
+        Causes identified from modal activity in the desired dimension,
+        or None if ``causes_dim`` is not valid.
 
     """
     # Determine the dimension of interest
@@ -215,7 +221,7 @@ def calculate_spatiotemporal_causes_from_peaks(
 
     elif causes_dim == "time":
         # If calculating temporal causes, get data from position
-        # oint in multi matrix
+        # point in multi matrix
         mode_activity_data = mode_spatiotemporal_activity_data[
             :, spatial_point
         ]

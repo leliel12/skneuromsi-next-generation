@@ -59,7 +59,7 @@ class Kording2007(Integrator):
     The Bayesian Causal Inference model uses the following formulation:
 
     .. math::
-       p(C \mid x_{1}, x_{2}) = \frac{p(x_{1}, x_{2} \mid C), p(C)}{p(x_{1},
+       p(C \mid x_{1}, x_{2}) = \frac{p(x_{1}, x_{2} \mid C) \, p(C)}{p(x_{1},
        x_{2})}
 
     where :math:`x_{1}` and :math:`x_{2}` are two unimodal signals, and
@@ -70,9 +70,9 @@ class Kording2007(Integrator):
     environment is defined as follows:
 
     .. math::
-        p(C = 1 \mid x_{1}, x_{2}) = \frac{p(x_{1}, x_{2} \mid C=1),
+        p(C = 1 \mid x_{1}, x_{2}) = \frac{p(x_{1}, x_{2} \mid C=1) \,
         p(C=1)}{p(x_{1}, x_{2} \mid C=1) \, p(C=1) + p(x_{1}, x_{2} \mid
-        C=2), (1 - p(C=1))}
+        C=2) \, (1 - p(C=1))}
 
     The likelihood is computed as:
 
@@ -89,6 +89,25 @@ class Kording2007(Integrator):
     of signals having a common cause. A higher likelihood occurs if the
     two unisensory signals are similar, which in turn increases the
     probability of inferring that the signals have a common cause.
+
+    The generative model assumes that every stimulus location is drawn from
+    a Gaussian prior with mean ``prior_mu`` and standard deviation
+    ``prior_sigma``, and that each modality measures it with Gaussian
+    noise (whose standard deviation is the ``sigma`` of the stimulus). The
+    model then estimates the location of each stimulus with one of three
+    strategies, which differ in how they use the posterior probability of
+    a common cause :math:`p(C = 1 \mid x_{1}, x_{2})`:
+
+    - ``"selection"``: fuses the signals if that probability is above 0.5,
+      and keeps them separate otherwise.
+    - ``"averaging"``: weights the fused and the separate estimates by
+      that probability.
+    - ``"matching"``: fuses the signals with a probability equal to it
+      (a random threshold is drawn in every simulation).
+
+    The result of a run is not a single estimate: the model simulates
+    ``n_sim`` observers and reports the distribution of their estimates
+    along the grid of positions (or of time).
 
     """
 
@@ -119,7 +138,9 @@ class Kording2007(Integrator):
         Parameters
         ----------
         n_sim : int
-            Number of simulations to run.
+            Number of simulations to run. Each one is an independent
+            observer, with its own noisy measurement of the stimuli. More
+            simulations give smoother distributions.
         mode0 : str
             The name for the first sensory modality (e.g., "auditory").
         mode1 : str
@@ -127,16 +148,27 @@ class Kording2007(Integrator):
         p_common : float
             The prior probability of a common cause.
         prior_sigma : float
-            The standard deviation of the prior cause.
+            The standard deviation of the prior cause (how widely the
+            stimuli are expected to be spread).
         prior_mu : float
-            The mean of the prior cause.
+            The mean of the prior cause (where the stimuli are expected
+            to be).
         strategy : str
             The strategy for model selection
             ("selection", "averaging", "matching").
         noise : bool
-            Whether the unisensory measurements carry noise.
+            Whether the unisensory measurements carry noise. The Backend
+            reads this value when it encodes the stimuli.
         dimension : str
-            The dimension to run the model ("space" or "time").
+            The dimension to run the model ("space" or "time"). It
+            decides which axis of the result holds the distribution of
+            estimates.
+
+        Raises
+        ------
+        ValueError
+            If ``mode0`` and ``mode1`` are the same, or if ``strategy``
+            or ``dimension`` are not valid.
         """
         if mode0 == mode1:
             raise ValueError("mode0 and mode1 must name different modalities.")
@@ -187,7 +219,19 @@ class Kording2007(Integrator):
     # MODEL METHODS =========================================================
 
     def check_stimuli_compatible(self, modalities):
-        """Require exactly one signal for each configured sensory modality."""
+        """Require exactly one signal for each configured sensory modality.
+
+        Parameters
+        ----------
+        modalities : iterable of str
+            Modality names of the incoming signals.
+
+        Raises
+        ------
+        ValueError
+            If there are not exactly two signals, or if they are not one
+            of ``mode0`` and one of ``mode1``.
+        """
         modalities = list(modalities)
         if len(modalities) != 2:
             raise ValueError(
@@ -209,7 +253,17 @@ class Kording2007(Integrator):
         unisensory_input,
         n,
     ):
-        """Estimates the unisensory posterior given the input and prior.
+        r"""Estimates the unisensory posterior given the input and prior.
+
+        This is the location estimate of one modality when it is treated
+        as an independent cause: the precision-weighted average of the
+        measurement and the prior mean,
+
+        .. math::
+            \hat{s} = \left( \frac{x}{\sigma^2}
+            + \frac{\mu_p}{\sigma_p^2} \right) \hat{\sigma}^2
+
+        with :math:`\hat{\sigma}^2 = (1/\sigma^2 + 1/\sigma_p^2)^{-1}`.
 
         Parameters
         ----------
@@ -264,6 +318,19 @@ class Kording2007(Integrator):
     ):
         """Estimates the multisensory posterior using Bayesian inference.
 
+        It does three things for each simulated observer. First, it
+        computes the estimate under a common cause (fusion of both
+        measurements and the prior). Second, it weighs the evidence for a
+        common cause against the evidence for independent causes, giving
+        the posterior probability of a common cause. Third, it combines the
+        fused and the separate estimates according to the chosen strategy.
+        Finally, the estimates of all the observers are binned into
+        probability distributions along the grid.
+
+        Note that the ``"multi"`` distribution is the fused estimate
+        itself, so it does not depend on the strategy: only the estimates
+        of each modality do.
+
         Parameters
         ----------
         mode0_estimate : numpy.ndarray
@@ -312,7 +379,8 @@ class Kording2007(Integrator):
             - "mode0": The posterior estimate of the first modality.
             - "mode1": The posterior estimate of the second modality.
             - "multi": The multisensory posterior estimate.
-            - "pc": The posterior probability of a common cause.
+            - "pc": The posterior probability of a common cause (one value
+              per simulation).
         """
         # A nonzero count means at least one modality is missing, so the
         # independent-cause estimates will be used below.
@@ -328,7 +396,8 @@ class Kording2007(Integrator):
             + (np.ones(n) * prior_mu) / prior_var
         ) * multisensory_var_hat
 
-        # Squared deviations feed the Gaussian likelihoods: dis_common
+        # Squared deviations feed the Gaussian likelihoods (Kording et al.,
+        # 2007, eqs. 2 and 3): dis_common
         # measures joint discrepancy under one latent location, while the
         # modality-specific terms measure each observation from the prior mean.
         dis_common = (
@@ -339,7 +408,8 @@ class Kording2007(Integrator):
         dis_mode0 = (mode0_input - prior_mu) ** 2
         dis_mode1 = (mode1_input - prior_mu) ** 2
 
-        # Evaluate evidence under each hypothesis. Under independent causes,
+        # Evaluate evidence under each hypothesis (the likelihood of both
+        # measurements given a common cause, and given independent ones). Under independent causes,
         # the joint likelihood is the product of the two modality likelihoods.
         likelihood_common = np.exp(-dis_common / (2 * multisensory_var)) / (
             2 * np.pi * np.sqrt(multisensory_var)
@@ -394,6 +464,8 @@ class Kording2007(Integrator):
 
         # Bin simulated estimates on the location grid, then normalize counts
         # to turn them into predicted probability distributions.
+        # Each grid point is the center of a bin of width `locations_res`, so
+        # the bin edges lie half a step to either side of the points.
         edges = possible_locations - locations_res / 2
         edges = np.append(edges, edges[-1] + locations_res)
 
@@ -428,6 +500,11 @@ class Kording2007(Integrator):
     ):
         """Runs the causal inference over a pair of Bayesian signals.
 
+        The model computes a single distribution of estimates for each
+        modality. Since it has no dynamics, that distribution fills only
+        one row (``dimension="space"``) or one column
+        (``dimension="time"``) of the response; the rest stays at zero.
+
         Parameters
         ----------
         signals : dict
@@ -436,11 +513,13 @@ class Kording2007(Integrator):
             measurement (``values["input"]``) already computed by the
             stimulus.
         time_range : (float, float)
-            The time grid of the simulation, given by the Backend.
+            The time grid of the simulation, given by the Backend. It
+            defines the grid of the estimates when ``dimension="time"``.
         time_res : float
             Temporal resolution of the simulation.
         position_range : (float, float)
-            The position grid of the simulation, given by the Backend.
+            The position grid of the simulation, given by the Backend. It
+            defines the grid of the estimates when ``dimension="space"``.
         position_res : float
             Spatial resolution of the simulation.
         random : numpy.random.Generator
@@ -451,8 +530,9 @@ class Kording2007(Integrator):
         tuple
             A tuple containing:
             - dict: Response dictionary with "mode0", "mode1" and "multi".
-            - dict: Extra information with "mean_p_common_cause" and
-            "p_common_cause".
+            - dict: Extra information with "mean_p_common_cause" (the
+            average over the simulations) and "p_common_cause" (the value
+            of each simulation).
         """
         mode0_signal = signals[self.mode0]
         mode1_signal = signals[self.mode1]
@@ -478,15 +558,18 @@ class Kording2007(Integrator):
             possible_locations = t_range
             locations_res = time_res
 
-        # The signals are standard deviations squared; the Bayesian
-        # calculations below use variances (and therefore precisions).
-        # The input parameters are standard deviations too.
+        # The signals already carry the variance of each stimulus (the
+        # square of its sigma); the prior is given as a standard deviation,
+        # so it is squared here. The Bayesian calculations below work with
+        # variances (and therefore with precisions, their inverses).
         mode0_var = mode0_signal.values["var"]
         mode1_var = mode1_signal.values["var"]
         prior_var = np.square(self.prior_sigma)
 
         # Set variances for the shared-cause likelihood and the two
-        # independent-cause likelihoods.
+        # independent-cause likelihoods: for independent causes each
+        # modality is spread by its own noise plus the prior; for a common
+        # cause the joint spread is the product-form expression of the paper.
         multisensory_var = (
             mode0_var * mode1_var
             + mode0_var * prior_var
@@ -583,6 +666,9 @@ class Kording2007(Integrator):
 
     def calculate_causes(self, mean_p_common_cause, causes_kind, **kwargs):
         """Calculates the causes of the stimuli.
+
+        The number of causes is read from the probability of a common
+        cause: more than 0.5 means one cause, otherwise two.
 
         Parameters
         ----------

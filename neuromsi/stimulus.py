@@ -1,3 +1,12 @@
+"""Stimuli: descriptions of the external events that reach the senses.
+
+A :class:`Stimulus` says what happened in the world (where, how strong, how
+uncertain and when) and knows how to encode itself as the signal that a
+model consumes (see :mod:`neuromsi.signal`). :class:`Visual` and
+:class:`Audio` are the ready-to-use stimuli, with the default values of
+each modality.
+"""
+
 import numpy as np
 
 from neuromsi.utils.neural_tools import calculate_neural_distance
@@ -16,6 +25,18 @@ class Stimulus:
     ``_create_unimodal_stimuli_matrix``), but it knows nothing about the
     integration dynamics or the connectivity of the network that will
     consume it.
+
+    The encoding depends on the kind of model that consumes the stimulus:
+    :meth:`generate_neural_signal` for neural models and
+    :meth:`generate_bayesian_signal` for Bayesian ones. The Backend calls
+    the right one, so users only need to describe the stimulus.
+
+    Attributes
+    ----------
+    position, intensity, sigma, onset, duration, stim_n, soa
+        The values given to the constructor (see ``__init__``).
+    modality : str
+        Class attribute with the name of the sensory modality.
     """
 
     #: Modality name. Backend uses it to route this stimulus to the
@@ -47,8 +68,8 @@ class Stimulus:
         onset : float, optional
             Time (ms) at which the stimulus starts. Default 0.
         duration : float or None, optional
-            How long the stimulus lasts (ms). If None, the integrator
-            interprets it as "it lasts the whole simulation".
+            How long the stimulus lasts (ms). If None, it lasts the whole
+            simulation.
         stim_n : int, optional
             Number of repetitions of this stimulus over time (e.g. two
             beeps instead of one). Default 1.
@@ -78,7 +99,15 @@ class Stimulus:
 
         Discretizes the stimulus (position, intensity and sigma) over an
         array of ``neurons`` neurons that encode the 1D space. The
-        Gaussian reflects the uncertainty in the stimulus detection.
+        Gaussian reflects the uncertainty in the stimulus detection:
+
+        .. math::
+            E(j) = E_0 \\, e^{-d(j, p)^2 / 2 \\sigma^2}
+
+        where :math:`p` is the position of the stimulus, :math:`d` the
+        distance on the ring of neurons, :math:`E_0` the intensity and
+        :math:`\\sigma` the sigma of the stimulus. The position is
+        used as a neuron index, so it assumes one neuron per position unit.
 
         Parameters
         ----------
@@ -95,6 +124,9 @@ class Stimulus:
         the_stimuli = np.zeros(neurons, dtype=dtype)
 
         for neuron_j in range(neurons):
+            # Distance from this neuron to the stimulus, on the ring (the
+            # space wraps around). The closer the neuron, the stronger its
+            # input; it peaks at `intensity` on the stimulus position.
             distance = calculate_neural_distance(
                 neurons, neuron_j, self.position
             )
@@ -139,8 +171,14 @@ class Stimulus:
         ------
         ValueError
             If the total duration of all stimuli plus that of the
-            inter-stimulus intervals exceeds ``simulation_length``.
+            inter-stimulus intervals exceeds ``simulation_length``, if the
+            SOA is shorter than the duration, or if the onset leaves no
+            room for the whole stimulus inside the simulation (NumPy then
+            reports "negative dimensions are not allowed").
         """
+        # The matrix is built with one row per time unit (ms), so the
+        # timing values are used as whole numbers. The resolution is
+        # applied at the very end.
         onset = int(self.onset)
         stimuli_n = int(self.stim_n)
         soa = self.soa
@@ -149,6 +187,7 @@ class Stimulus:
             self.duration if self.duration is not None else simulation_length
         )
 
+        # Validate that the whole sequence fits in the simulation.
         if duration * stimuli_n > simulation_length:
             raise ValueError(
                 "Stimuli total duration exceeds simulation length."
@@ -166,13 +205,20 @@ class Stimulus:
             if soa < duration:
                 raise ValueError("SOA must be longer than stimulus duration.")
 
+        # `stimuli` is the spatial profile while the stimulus is on, and
+        # `no_stim` is the silence (all zeros) before, between and after.
         stimuli = self._calculate_stimuli_input(neurons, dtype=dtype)
         no_stim = np.zeros(neurons, dtype=dtype)
 
+        # Nothing to deliver: the whole simulation is silent.
         if stimuli_n == 0:
             stim = np.tile(no_stim, (simulation_length, 1))
             stimuli_matrix = np.repeat(stim, 1 / time_res, axis=0)
             return stimuli_matrix
+
+        # The timeline is, in order:
+        #   silence (onset) | stimulus | gap | stimulus | ... | silence
+        # Every block is a (time units, neurons) array, joined at the end.
 
         # Input before onset
         pre_stim = np.tile(no_stim, (onset, 1))
@@ -180,12 +226,13 @@ class Stimulus:
         # Input during stimulus delivery
         stim = np.tile(stimuli, (duration, 1))
 
-        # Input during onset asynchrony
+        # Input during onset asynchrony: the gap between two repetitions
+        # lasts SOA - duration, since SOA is measured from onset to onset.
         soa_stim = (
             np.tile(no_stim, (soa - duration, 1)) if soa is not None else None
         )
 
-        # Input after stimulation
+        # Input after stimulation: whatever time is left of the simulation.
         post_stim_time = simulation_length - onset - duration * stimuli_n
         post_stim_time = (
             post_stim_time - (soa - duration) * (stimuli_n - 1)
@@ -194,9 +241,12 @@ class Stimulus:
         )
         post_stim = np.tile(no_stim, (post_stim_time, 1))
 
-        # Input concatenation
+        # Input concatenation: (stimulus, gap) repeated stim_n - 1 times,
+        # then the last stimulus, which has no gap after it.
         stim_list = [stim, soa_stim] * (stimuli_n - 1)
         complete_stim = np.vstack((pre_stim, *stim_list, stim, post_stim))
+        # Refine the time axis: each time unit becomes 1 / time_res rows,
+        # so the matrix has one row per integration step.
         stimuli_matrix = np.repeat(complete_stim, 1 / time_res, axis=0)
 
         return stimuli_matrix
@@ -229,8 +279,12 @@ class Stimulus:
             an array of ``n`` values otherwise.
         """
         unisensory_var = np.square(self.sigma)
+        # Without noise there is no randomness: the measurement is the
+        # position shifted by exactly one standard deviation.
         if noise is False:
             return self.position + np.sqrt(unisensory_var)
+        # With noise: position + sigma * N(0, 1), one independent draw
+        # for each simulation.
         return self.position + np.sqrt(
             unisensory_var
         ) * random.standard_normal(n)
@@ -301,7 +355,28 @@ class Stimulus:
 
 
 class Visual(Stimulus):
-    """A visual stimulus (e.g. a flash of light at a position)."""
+    """A visual stimulus (e.g. a flash of light at a position).
+
+    Same as :class:`Stimulus`, with the default values of vision: a strong
+    stimulus (``intensity=27``) with a precise location (``sigma=4``),
+    lasting 100 ms. Only ``position`` is positional; everything else is
+    keyword-only and can be overridden.
+
+    Parameters
+    ----------
+    position : float
+        Spatial position of the stimulus, in degrees.
+    intensity : float, optional
+        Maximum amplitude. Default 27.
+    sigma : float, optional
+        Spatial uncertainty. Default 4.
+    onset : float, optional
+        Start time (ms). Default 0.
+    duration : float or None, optional
+        Duration (ms). Default 100.
+    **kwargs
+        ``stim_n`` and ``soa``, as in :class:`Stimulus`.
+    """
 
     modality = "visual"
 
@@ -326,7 +401,28 @@ class Visual(Stimulus):
 
 
 class Audio(Stimulus):
-    """An auditory stimulus (e.g. a beep at a position)."""
+    """An auditory stimulus (e.g. a beep at a position).
+
+    Same as :class:`Stimulus`, with the default values of audition: a
+    strong stimulus (``intensity=28``) with a much vaguer location than
+    vision (``sigma=32``), lasting 100 ms. Only ``position`` is positional;
+    everything else is keyword-only and can be overridden.
+
+    Parameters
+    ----------
+    position : float
+        Spatial position of the stimulus, in degrees.
+    intensity : float, optional
+        Maximum amplitude. Default 28.
+    sigma : float, optional
+        Spatial uncertainty. Default 32.
+    onset : float, optional
+        Start time (ms). Default 0.
+    duration : float or None, optional
+        Duration (ms). Default 100.
+    **kwargs
+        ``stim_n`` and ``soa``, as in :class:`Stimulus`.
+    """
 
     modality = "auditory"
 

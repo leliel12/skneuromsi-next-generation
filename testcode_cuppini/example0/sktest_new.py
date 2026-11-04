@@ -20,6 +20,7 @@ model = Backend(stimuli=[ears, eyes],
                 position_range=(0, 90),
                 )
 
+
 res = model.run()
 # Results plot
 ax1 = plt.subplot()
