@@ -9,7 +9,7 @@ from neuromsi.utils.neural_tools import calculate_neural_distance
 
 class Integrator:
     """
-    Base class of the multisensory models (neural and Bayesian).
+    Base class of the multisensory models (neural, Bayesian and MLE).
 
     An integrator receives one signal per modality, already encoded by the
     stimuli, and returns the response of the model. It knows nothing about
@@ -26,8 +26,8 @@ class Integrator:
     and adds its own parameters, dynamics and causal-inference mechanism.
     A subclass must provide:
 
-    - ``model_type``: ``"Neural"`` or ``"Bayesian"``, so the Backend knows
-      how to encode the stimuli.
+    - ``model_type``: ``"Neural"``, ``"Bayesian"`` or ``"MLE"``, so the
+      Backend knows how to encode the stimuli.
     - :meth:`check_stimuli_compatible`: which modalities it accepts.
     - ``integrate(signals, **kwargs)``: the model itself. It returns a
       tuple ``(response, extra)``.
@@ -194,7 +194,7 @@ class Integrator:
         for modality, signal in signals.items():
             if modality != signal.modality:
                 raise ValueError(
-                    f"NeuralSignal key {modality!r} does not match its modality "
+                    f"Signal key {modality!r} does not match its modality "
                     f"{signal.modality!r}."
                 )
         # The model decides which combination of modalities it accepts.

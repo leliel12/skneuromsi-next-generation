@@ -6,10 +6,11 @@ and connectivity; Backend validates inputs and coordinates each run.
 """
 
 from .stimulus import Audio, Stimulus, Visual
-from .signal import BayesianSignal, NeuralSignal
+from .signal import NeuralSignal, UnisensorySignal
 from .integrator import Integrator
 from .neural.cuppini2017 import Cuppini2017
 from .bayesian.kording2007 import Kording2007
+from .mle.alais_burr2004 import AlaisBurr2004
 from .backend import Backend
 
 __all__ = [
@@ -17,9 +18,10 @@ __all__ = [
     "Visual",
     "Audio",
     "NeuralSignal",
-    "BayesianSignal",
+    "UnisensorySignal",
     "Integrator",
     "Cuppini2017",
     "Kording2007",
+    "AlaisBurr2004",
     "Backend",
 ]

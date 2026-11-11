@@ -16,9 +16,9 @@ class Backend:
     A run goes from the description of the world to the result of the
     model: the stimuli encode themselves as signals, the integrator turns
     the signals into a response, and the Backend packs everything in an
-    :class:`~neuromsi.core.NDResult`. The same Backend works with neural and
-    Bayesian models, as it reads the ``model_type`` of the integrator to
-    decide how the stimuli must be encoded.
+    :class:`~neuromsi.core.NDResult`. The same Backend works with neural,
+    Bayesian and MLE models, as it reads the ``model_type`` of the
+    integrator to decide how the stimuli must be encoded.
 
     Examples
     --------
@@ -91,9 +91,9 @@ class Backend:
         range describes at 'position_res'. Checking it here avoids running
         the whole simulation only to fail when building the result.
 
-        Models without neurons (e.g. Bayesian models, whose grid is defined
-        by 'position_range' and 'position_res' alone) are skipped; NDResult
-        validates the grid when the result is built.
+        Models without neurons (e.g. statistical models, whose grid is
+        defined by 'position_range' and 'position_res' alone) are skipped;
+        NDResult validates the grid when the result is built.
 
         Raises
         ------
@@ -126,8 +126,9 @@ class Backend:
         Encodes every stimulus as the signal its model consumes.
 
         The model type decides the encoding: neural models receive a
-        time-by-neuron matrix per modality, Bayesian models receive the
-        stimulus variance and the unisensory measurement drawn from it.
+        time-by-neuron matrix per modality; statistical models (Bayesian
+        and MLE) receive the stimulus variance and the unisensory
+        measurement drawn from it.
 
         Returns
         -------
@@ -142,11 +143,16 @@ class Backend:
         """
         model_type = getattr(self.integrator, "model_type", None)
 
-        if model_type == "Bayesian":
+        if model_type in {"Bayesian", "MLE"}:
+            # Statistical models consume the same unisensory signal: a
+            # measurement and its variance. ``n_sim`` is optional because
+            # MLE models may not simulate observers.
+            n_sim = getattr(self.integrator, "n_sim", 1)
+            noise = getattr(self.integrator, "noise", False)
             return {
-                stim.modality: stim.generate_bayesian_signal(
-                    n=self.integrator.n_sim,
-                    noise=self.integrator.noise,
+                stim.modality: stim.generate_unisensory_signal(
+                    n=n_sim,
+                    noise=noise,
                     random=self.random,
                 )
                 for stim in self.stimuli
@@ -163,8 +169,8 @@ class Backend:
             }
 
         raise ValueError(
-            f"Unknown model_type {model_type!r}. Expected 'Neural' or "
-            f"'Bayesian'. Got {model_type!r}."
+            f"Unknown model_type {model_type!r}. Expected 'Neural', "
+            f"'Bayesian' or 'MLE'. Got {model_type!r}."
         )
 
     def _make_ndresult(self, response, extra, stimuli):
@@ -262,7 +268,7 @@ class Backend:
            compatible with the model.
         2. Each stimulus is encoded as the signal the model consumes (a
            time-by-neuron matrix for neural models, a variance and a
-           measurement for Bayesian ones).
+           measurement for statistical ones).
         3. The integrator processes the signals over the configured time
            and position grids.
         4. The response is packed, together with the causes, the run

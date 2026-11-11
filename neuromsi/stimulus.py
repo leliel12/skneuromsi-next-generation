@@ -11,7 +11,7 @@ import numpy as np
 
 from neuromsi.utils.neural_tools import calculate_neural_distance
 
-from .signal import BayesianSignal, NeuralSignal
+from .signal import NeuralSignal, UnisensorySignal
 
 
 class Stimulus:
@@ -28,8 +28,9 @@ class Stimulus:
 
     The encoding depends on the kind of model that consumes the stimulus:
     :meth:`generate_neural_signal` for neural models and
-    :meth:`generate_bayesian_signal` for Bayesian ones. The Backend calls
-    the right one, so users only need to describe the stimulus.
+    :meth:`generate_unisensory_signal` for statistical models (Bayesian
+    and MLE). The Backend calls the right one, so users only need to
+    describe the stimulus.
 
     Attributes
     ----------
@@ -254,19 +255,18 @@ class Stimulus:
     def _draw_measurement(self, *, noise, n, random):
         """Draws one unisensory measurement of this stimulus.
 
-        This is the measurement a Bayesian causal-inference model works
-        with: the true stimulus position plus a Gaussian draw whose scale
-        is the stimulus uncertainty. It belongs to the stimulus because
-        it only depends on where the stimulus is and how uncertain it is;
-        ``noise``, the number of simulations and the random generator
-        come from the model / backend that asks for it.
+        This is the measurement a statistical model (Bayesian or MLE)
+        works with: the true stimulus position plus a Gaussian draw whose
+        scale is the stimulus uncertainty. It belongs to the stimulus
+        because it only depends on where the stimulus is and how uncertain
+        it is; ``noise``, the number of simulations and the random
+        generator come from the model / backend that asks for it.
 
         Parameters
         ----------
         noise : bool
-            Whether to include noise in the computation. If False, a
-            fixed one-standard-deviation offset is used instead of a
-            random draw.
+            Whether to include noise in the computation. If False, the
+            true stimulus position is returned (a perfect measurement).
         n : int
             Number of simulations (one independent draw each).
         random : numpy.random.Generator
@@ -278,16 +278,22 @@ class Stimulus:
             The computed input: a scalar when ``noise`` is False,
             an array of ``n`` values otherwise.
         """
-        unisensory_var = np.square(self.sigma)
-        # Without noise there is no randomness: the measurement is the
-        # position shifted by exactly one standard deviation.
+        # unisensory_var = np.square(self.sigma)
+        # Without noise the measurement is the true position of the
+        # stimulus: a perfect observer. We used to return
+        # ``position + sqrt(var)`` (a fixed one-sigma offset), but that
+        # is not a noise-free measurement: it biases every model that
+        # consumes the signal (e.g. Kording2007 and AlaisBurr2004). The
+        # offset had no theoretical justification, so it was removed.
+        #
+        # Previous behavior, kept for reference:
+        # if noise is False:
+        #     return self.position + np.sqrt(unisensory_var)
         if noise is False:
-            return self.position + np.sqrt(unisensory_var)
+            return self.position
         # With noise: position + sigma * N(0, 1), one independent draw
         # for each simulation.
-        return self.position + np.sqrt(
-            unisensory_var
-        ) * random.standard_normal(n)
+        return self.position + self.sigma * random.standard_normal(n)
 
     def generate_neural_signal(
         self,
@@ -324,34 +330,35 @@ class Stimulus:
 
         return NeuralSignal(modality=self.modality, values=values)
 
-    def generate_bayesian_signal(self, n, noise, random):
+    def generate_unisensory_signal(self, n, noise, random):
         """
-        Encodes this stimulus as a measurement for a Bayesian model.
+        Encodes this stimulus as a unisensory estimate for a model.
 
-        Instead of a time-by-neuron matrix, a Bayesian model consumes the
-        stimulus variance and the unisensory input drawn from it
-        (``_draw_measurement``).
+        Instead of a time-by-neuron matrix, statistical models (Bayesian
+        and MLE) consume the stimulus variance and the unisensory input
+        drawn from it (``_draw_measurement``).
 
         Parameters
         ----------
         n : int
             Number of simulations of the model.
         noise : bool
-            Whether to include noise in the input computation.
+            Whether to include noise in the input computation. If False,
+            the input is the true position of the stimulus.
         random : numpy.random.Generator
             The random number generator used for the draws.
 
         Returns
         -------
-        BayesianSignal
-            The measurement ready to be used by the model.
+        UnisensorySignal
+            The unisensory estimate ready to be used by the model.
         """
         values = {
             "var": float(np.square(self.sigma)),
             "input": self._draw_measurement(noise=noise, n=n, random=random),
         }
 
-        return BayesianSignal(modality=self.modality, values=values)
+        return UnisensorySignal(modality=self.modality, values=values)
 
 
 class Visual(Stimulus):

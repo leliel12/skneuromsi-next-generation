@@ -43,7 +43,7 @@ class Kording2007(Integrator):
     (Zhu, Beierholm & Shams, 2024).
 
     The model is decoupled from the stimuli: the Backend encodes each
-    stimulus as a :class:`~neuromsi.signal.BayesianSignal` (the stimulus
+    stimulus as a :class:`~neuromsi.signal.UnisensorySignal` (the stimulus
     variance plus the unisensory measurement drawn from it) and passes
     those signals to :meth:`execute`. Everything that is not an
     observation of the world lives here: the priors, the causal prior,
@@ -111,7 +111,7 @@ class Kording2007(Integrator):
 
     """
 
-    #: This model consumes Bayesian signals, not neural ones.
+    #: This model consumes unisensory signals, not neural ones.
     model_type = "Bayesian"
 
     def __init__(
@@ -498,7 +498,7 @@ class Kording2007(Integrator):
         position_res,
         random,
     ):
-        """Runs the causal inference over a pair of Bayesian signals.
+        """Runs the causal inference over a pair of unisensory signals.
 
         The model computes a single distribution of estimates for each
         modality. Since it has no dynamics, that distribution fills only
@@ -508,7 +508,7 @@ class Kording2007(Integrator):
         Parameters
         ----------
         signals : dict
-            Bayesian signals keyed by modality. Each one carries the
+            Unisensory signals keyed by modality. Each one carries the
             stimulus variance (``values["var"]``) and the unisensory
             measurement (``values["input"]``) already computed by the
             stimulus.

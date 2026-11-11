@@ -9,7 +9,8 @@ There is one kind of signal per kind of model, and the Backend picks the
 right one according to the ``model_type`` of the integrator:
 
 - :class:`NeuralSignal` for neural models (time-by-neuron input).
-- :class:`BayesianSignal` for Bayesian models (variance and measurement).
+- :class:`UnisensorySignal` for statistical models, both Bayesian and
+  MLE (variance and measurement).
 
 Both are immutable and validate their content when they are created.
 """
@@ -60,14 +61,14 @@ class NeuralSignal:
 
 
 @dataclass(frozen=True)
-class BayesianSignal:
-    """Sensory measurement of one modality for a Bayesian model.
+class UnisensorySignal:
+    """Unisensory estimate of one modality for a statistical model.
 
-    ``values`` is a mapping with the two pieces a causal-inference model
-    needs: the stimulus uncertainty (``"var"``, the variance of the
-    stimulus) and the unisensory measurement drawn from it (``"input"``).
-    There is no time-by-neuron matrix here: the Bayesian model works on
-    simulations, not on a neural grid.
+    ``values`` is a mapping with the two pieces a statistical model
+    (Bayesian or MLE) needs: the stimulus uncertainty (``"var"``, the
+    variance of the stimulus) and the unisensory measurement drawn from
+    it (``"input"``). There is no time-by-neuron matrix here: these
+    models work with summary statistics, not with a neural grid.
 
     Attributes
     ----------
@@ -95,7 +96,7 @@ class BayesianSignal:
 
     def __post_init__(self):
         if not self.modality:
-            raise ValueError("BayesianSignal.modality cannot be empty.")
+            raise ValueError("UnisensorySignal.modality cannot be empty.")
         # Work on a copy so the caller cannot change the signal afterwards
         # by modifying the dict it passed in.
         values = dict(self.values)
@@ -103,14 +104,14 @@ class BayesianSignal:
         if missing:
             missing_str = ", ".join(sorted(missing))
             raise ValueError(
-                "BayesianSignal.values must contain the "
+                "UnisensorySignal.values must contain the "
                 f"entries {missing_str!r}."
             )
         # A variance of zero (or less) would break the precision
         # (1 / variance) computations of the model.
         if np.ndim(values["var"]) != 0 or values["var"] <= 0:
             raise ValueError(
-                "BayesianSignal.values['var'] must be a positive scalar. "
+                "UnisensorySignal.values['var'] must be a positive scalar. "
                 f"Got {values['var']!r}."
             )
         object.__setattr__(self, "values", values)
