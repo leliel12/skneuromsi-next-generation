@@ -125,10 +125,10 @@ class Backend:
         """
         Encodes every stimulus as the signal its model consumes.
 
-        The model type decides the encoding: neural models receive a
-        time-by-neuron matrix per modality; statistical models (Bayesian
-        and MLE) receive the stimulus variance and the unisensory
-        measurement drawn from it.
+        The Backend does not know how a signal is built: it hands itself
+        to each stimulus, which reads from it the integrator and the
+        context of the run and decides the encoding (see
+        :meth:`Stimulus.generate_signal`).
 
         Returns
         -------
@@ -141,37 +141,10 @@ class Backend:
             If the model does not declare a known ``model_type``.
 
         """
-        model_type = getattr(self.integrator, "model_type", None)
-
-        if model_type in {"Bayesian", "MLE"}:
-            # Statistical models consume the same unisensory signal: a
-            # measurement and its variance. ``n_sim`` is optional because
-            # MLE models may not simulate observers.
-            n_sim = getattr(self.integrator, "n_sim", 1)
-            noise = getattr(self.integrator, "noise", False)
-            return {
-                stim.modality: stim.generate_unisensory_signal(
-                    n=n_sim,
-                    noise=noise,
-                    random=self.random,
-                )
-                for stim in self.stimuli
-            }
-
-        if model_type == "Neural":
-            return {
-                stim.modality: stim.generate_neural_signal(
-                    neurons=self.integrator.neurons,
-                    simulation_length=self.time_range[1],
-                    time_res=self.time_res,
-                )
-                for stim in self.stimuli
-            }
-
-        raise ValueError(
-            f"Unknown model_type {model_type!r}. Expected 'Neural', "
-            f"'Bayesian' or 'MLE'. Got {model_type!r}."
-        )
+        signals = {}
+        for stim in self.stimuli:
+            signals[stim.modality] = stim.generate_signal(self)
+        return signals
 
     def _make_ndresult(self, response, extra, stimuli):
         """
@@ -199,12 +172,14 @@ class Backend:
         NDResult
             The result of the run.
         """
-        extra.update({
-            "causes_kind": self.causes_kind,
-            "causes_dim": self.causes_dim,
-            "causes_peak_threshold": self.causes_peak_threshold,
-            "causes_peak_distance": self.causes_peak_distance,
-        })
+        extra.update(
+            {
+                "causes_kind": self.causes_kind,
+                "causes_dim": self.causes_dim,
+                "causes_peak_threshold": self.causes_peak_threshold,
+                "causes_peak_distance": self.causes_peak_distance,
+            }
+        )
 
         # Keep each unisensory response under its modality name.
         modes = {stim.modality: response[stim.modality] for stim in stimuli}
@@ -312,6 +287,6 @@ class Backend:
         extra["stim_position"] = [stim.position for stim in self.stimuli]
 
         # 4. Pack the response, causes and run parameters into the result.
-        ndresult =self._make_ndresult(response, extra, self.stimuli)
+        ndresult = self._make_ndresult(response, extra, self.stimuli)
 
         return ndresult

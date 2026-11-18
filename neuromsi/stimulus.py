@@ -26,11 +26,12 @@ class Stimulus:
     integration dynamics or the connectivity of the network that will
     consume it.
 
-    The encoding depends on the kind of model that consumes the stimulus:
-    :meth:`generate_neural_signal` for neural models and
-    :meth:`generate_unisensory_signal` for statistical models (Bayesian
-    and MLE). The Backend calls the right one, so users only need to
-    describe the stimulus.
+    The encoding depends on the kind of model that consumes the stimulus.
+    :meth:`generate_signal` is the only entry point: it receives the
+    Backend, looks at the ``model_type`` of its integrator and dispatches
+    to the right encoder (a time-by-neuron matrix for neural models, a
+    measurement and its variance for statistical ones). The Backend just
+    calls it, so users only need to describe the stimulus.
 
     Attributes
     ----------
@@ -44,6 +45,15 @@ class Stimulus:
     #: corresponding integrator input (e.g. "visual", "auditory").
     #: Subclasses override it.
     modality: str = "generic"
+
+    #: Dispatch table of :meth:`generate_signal`: which encoder produces
+    #: the signal of each ``model_type``. To support a new kind of model,
+    #: write its encoder and register it here.
+    _SIGNAL_ENCODERS = {
+        "Neural": "_generate_neural_signal",
+        "Bayesian": "_generate_unisensory_signal",
+        "MLE": "_generate_unisensory_signal",
+    }
 
     def __init__(
         self,
@@ -295,24 +305,19 @@ class Stimulus:
         # for each simulation.
         return self.position + self.sigma * random.standard_normal(n)
 
-    def generate_neural_signal(
-        self,
-        neurons,
-        simulation_length,
-        time_res,
-        dtype=np.float32,
-    ):
+    def _generate_neural_signal(self, backend, dtype=np.float32):
         """
         Encodes this stimulus as external sensory drive for an integrator.
 
         Parameters
         ----------
-        neurons : int
-            Number of neurons of the integrator.
-        simulation_length : float
-            Total duration of the simulation.
-        time_res : float
-            Temporal resolution of the simulation.
+        backend : Backend
+            The run the signal is for. It is used for the number of
+            ``neurons`` of its integrator, and for the ``time_range`` (the
+            matrix lasts until the end, assuming the start is 0) and the
+            ``time_res`` of the simulation. The drive of a neural model is
+            deterministic (its integrator adds the noise), so the random
+            generator of the backend is not used.
         dtype : numpy class, optional
             Data type of the temporal matrix. Default np.float32.
 
@@ -322,15 +327,15 @@ class Stimulus:
             The signal ready to be integrated.
         """
         values = self._create_unimodal_stimuli_matrix(
-            neurons=neurons,
-            simulation_length=simulation_length,
-            time_res=time_res,
+            neurons=backend.integrator.neurons,
+            simulation_length=backend.time_range[1],
+            time_res=backend.time_res,
             dtype=dtype,
         )
 
         return NeuralSignal(modality=self.modality, values=values)
 
-    def generate_unisensory_signal(self, n, noise, random):
+    def _generate_unisensory_signal(self, backend):
         """
         Encodes this stimulus as a unisensory estimate for a model.
 
@@ -340,13 +345,14 @@ class Stimulus:
 
         Parameters
         ----------
-        n : int
-            Number of simulations of the model.
-        noise : bool
-            Whether to include noise in the input computation. If False,
-            the input is the true position of the stimulus.
-        random : numpy.random.Generator
-            The random number generator used for the draws.
+        backend : Backend
+            The run the signal is for. It is used for the ``n_sim``
+            (number of simulations, 1 if the model does not have one, as
+            MLE models may not simulate observers) and the ``noise``
+            (False if it does not have one) of its integrator, and for
+            its random generator, used for the draws. If ``noise`` is
+            False, the input is the true position of the stimulus. The
+            time grid is not used: these models have no temporal dynamics.
 
         Returns
         -------
@@ -355,10 +361,53 @@ class Stimulus:
         """
         values = {
             "var": float(np.square(self.sigma)),
-            "input": self._draw_measurement(noise=noise, n=n, random=random),
+            "input": self._draw_measurement(
+                noise=getattr(backend.integrator, "noise", False),
+                n=getattr(backend.integrator, "n_sim", 1),
+                random=backend.random,
+            ),
         }
 
         return UnisensorySignal(modality=self.modality, values=values)
+
+    def generate_signal(self, backend):
+        """
+        Encodes this stimulus as the signal that the model of a run consumes.
+
+        It is a dispatcher: the ``model_type`` of the integrator of
+        ``backend`` selects the encoder from :attr:`_SIGNAL_ENCODERS`.
+        Every encoder receives the backend and picks from it what it
+        needs, so the kind of model and the parameters that shape the
+        signal always come from the same place.
+
+        Parameters
+        ----------
+        backend : Backend
+            The run the signal is for. The stimulus reads from it
+            ``integrator`` (the model that will consume the signal, with
+            its ``model_type``, number of neurons, number of simulations
+            and noise), ``time_range``, ``time_res`` and ``random`` (the
+            random number generator shared by the whole run).
+
+        Returns
+        -------
+        NeuralSignal or UnisensorySignal
+            The signal ready to be consumed by the model.
+
+        Raises
+        ------
+        ValueError
+            If the integrator does not declare a known ``model_type``.
+        """
+        model_type = getattr(backend.integrator, "model_type", None)
+        encoder_name = self._SIGNAL_ENCODERS.get(model_type)
+        if encoder_name is None:
+            known = ", ".join(repr(k) for k in self._SIGNAL_ENCODERS)
+            raise ValueError(
+                f"Unknown model_type {model_type!r}. Expected one of "
+                f"{known}."
+            )
+        return getattr(self, encoder_name)(backend)
 
 
 class Visual(Stimulus):
