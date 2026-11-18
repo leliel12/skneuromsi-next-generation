@@ -6,7 +6,7 @@ contratos entre piezas, las convenciones numéricas, lo que está muerto o roto
 y las decisiones abiertas. Está escrito a partir del código y del paper; donde
 algo no se pudo verificar, se dice.
 
-Última revisión del contenido: 2026-11-16 (rama `master`).
+Última revisión del contenido: 2026-11-18 (rama `master`, commit `7c09427`).
 
 ---
 
@@ -95,6 +95,9 @@ Hecho:
   `testcode_*/` (ver §9).
 - Docstrings estilo numpy y comentarios de algoritmo en estímulos, señales,
   integrador, backend, Cuppini2017 y Kording2007.
+- Codificación de señales sin `if` en el `Backend`: `SignalDispatcher` (tabla
+  por `model_type`) + codificadores públicos en `Stimulus` (ver §3 y §11).
+- Métodos internos privados (`_x`) en `Stimulus`, `Backend` e `Integrator`.
 
 Pendiente / no portado (existe en el paquete original, no acá):
 
@@ -129,13 +132,15 @@ Paso a paso de `Backend.run()` ([backend.py](neuromsi/backend.py)):
 
 1. `integrator.check_stimuli_compatible(modalities)` — falla temprano si las
    modalidades no son las que el modelo espera.
-2. `SignalDispatcher(self)` (recibe el propio `Backend`) y, por cada
-   estímulo, `dispatcher.encode(stim)` — clase de [backend.py](neuromsi/backend.py) que se crea dentro de `run()`.
-   Despacha por `integrator.model_type` con su tabla `_ENCODERS` (`model_type`
-   → adaptador). El adaptador (`_neural_signal` o `_statistical_signal`) junta
-   del integrador y de la corrida los argumentos y llama al codificador
-   **público** del estímulo, que no conoce al `Backend` ni al integrador (ver
-   tabla abajo). Valida `model_type` al construirse.
+2. `dispatcher = SignalDispatcher(self)` y, en un bucle de `run()`,
+   `signals[stim.modality] = dispatcher.encode(stim)`. `SignalDispatcher` es una
+   clase de [backend.py](neuromsi/backend.py) que recibe el propio `Backend` y
+   se crea dentro de `run()` (así ve siempre los valores actuales). Valida
+   `integrator.model_type` al construirse y despacha con su tabla `_ENCODERS`
+   (`model_type` → adaptador). El adaptador (`_neural_signal` o
+   `_statistical_signal`) lee de `backend.integrator`, `time_range`,
+   `time_res` y `random` los argumentos y llama al codificador **público** del
+   estímulo, que no conoce al `Backend` ni al integrador (ver tabla abajo).
 3. `integrator.execute(signals, time_range, time_res, position_range,
    position_res, random)` — valida las señales y delega en
    `integrator.integrate(...)`, que devuelve `(response, extra)`.
@@ -163,7 +168,8 @@ recibe argumentos explícitos y queda independiente del `Backend`.
 Un `model_type` desconocido lanza `ValueError` en
 `SignalDispatcher.__init__`. **Para soportar una familia de modelos nueva:**
 escribir su codificador público en `Stimulus`, un adaptador en
-`SignalDispatcher` y registrarlo en `_ENCODERS` (el `Backend` no cambia). Agregar un modelo *dentro* de
+`SignalDispatcher` y registrarlo en `_ENCODERS` (el `Backend` no cambia).
+Agregar un modelo *dentro* de
 una familia existente no toca ninguno de los dos.
 
 `NDResult.mtype` guarda ese `model_type` como string (no se valida contra una
@@ -299,6 +305,9 @@ Backend(stimuli, integrator, *, seed=None, time_range=(0, 100), time_res=0.01,
   integrador.
 - Métodos: `_check_position_range`, `_make_ndresult`,
   `_calculate_causes` (privados, van primero) y `run` (público, va al final).
+- `SignalDispatcher` (mismo archivo, definida antes de `Backend`) depende de
+  cuatro atributos del `Backend`: `integrator`, `time_range`, `time_res` y
+  `random`. Si se renombra alguno, hay que tocarla.
 
 ---
 
@@ -475,7 +484,13 @@ entere. Están verificados en el código salvo que se indique lo contrario.
    scripts de comparación lo buscan en `<raíz>/../scikit-neuromsi`, ruta que
    no existe: hay que ajustarla o instalar el original. Usan `matplotlib`.
 
-3. **Criterio de equivalencia**: la idea de los ejemplos es que, con los
+3. **Línea base numérica antes de refactorizar** (muy útil, se usó en los
+   refactors del `SignalDispatcher`): correr los tres modelos con semilla
+   fija, guardar `np.asarray(result.to_xarray())` y `result.causes_` con
+   `np.savez`, y tras el cambio comparar con `np.array_equal`. Debe dar
+   idéntico bit a bit si solo cambió la estructura.
+
+4. **Criterio de equivalencia**: la idea de los ejemplos es que, con los
    mismos parámetros y semilla, la nueva arquitectura reproduzca al original.
    Cualquier refactor debería conservar ese comportamiento (idealmente
    convirtiendo estas comparaciones en tests).
@@ -507,22 +522,43 @@ builtins), `check-manifest`, `coverage`, `pydocstyle`.
 
 ---
 
-## 11. Decisiones abiertas para el refactor
+## 11. Decisiones de diseño
 
-Preguntas de diseño que el código actual no resuelve; conviene decidirlas
-antes de mover piezas:
+### 11.1 Ya tomadas por el autor (no revertir sin consultar)
+
+- **Se mantiene el concepto del `Backend`:** conecta una colección de
+  estímulos con un integrador; el **estímulo emite señales**. No se rediseña
+  el contrato estímulo/señal/integrador de golpe (un boceto con `spec` y
+  registro de codificadores se juzgó demasiado complejo).
+- **Las señales se mantienen como concepto.** Se acepta que a futuro deberían
+  ser **de un solo tipo** (hoy hay dos, `NeuralSignal` y `UnisensorySignal`);
+  no está hecho ni definido cómo.
+- **`Backend` es un mal nombre**, pero no se cambia por ahora. Candidato:
+  `Experiment` (alternativa `Simulation`; evitar `Model`, que en el paper es el
+  integrador).
+- **Escala esperada:** *muchos* modelos pero a lo sumo ~3 familias nuevas
+  (hoy: `Neural`, `Bayesian`, `MLE`). Por eso el costo de tocar `Stimulus` y
+  `SignalDispatcher` al agregar una familia se acepta.
+- **Estilo:** el autor prefiere bucles explícitos en `run()` a
+  comprensiones, y soluciones simples a abstracciones elaboradas.
+
+### 11.2 Abiertas
+
+Preguntas que el código actual no resuelve; conviene decidirlas antes de
+mover piezas:
 
 1. **¿Dónde vive la codificación?** *Resuelta en parte.* El despacho por
    `model_type` vive en `SignalDispatcher` (clase de `backend.py`) como una
-   tabla (`_ENCODERS`) y no como un `if`; `Stimulus` expone codificadores con argumentos explícitos y
-   no depende del `Backend`. (Se probó antes que el dispatcher viviera en
-   `Stimulus` con `generate_signal(backend)`; se descartó porque acoplaba el
-   estímulo al `Backend`.) Quedan dos
-   costos: agregar una *familia* de modelos exige tocar `Stimulus` y `SignalDispatcher`
-   (se asume que serán pocas; los modelos nuevos dentro de una familia no
-   tocan nada), y los adaptadores leen atributos del integrador (`neurons`,
-   `n_sim`, `noise`) por convención, sin contrato formal. Alternativa futura:
-   que el integrador declare qué señal necesita.
+   tabla (`_ENCODERS`) y no como un `if`; `Stimulus` expone codificadores con
+   argumentos explícitos y no depende del `Backend`. (Se probó antes que el
+   dispatcher viviera en `Stimulus` con `generate_signal(backend)`; se
+   descartó porque acoplaba el estímulo al `Backend`. Pasar al dispatcher el
+   `Backend` entero, y no valores sueltos, fue una decisión del autor.) Quedan
+   dos costos: agregar una *familia* de modelos exige tocar `Stimulus` y
+   `SignalDispatcher` (se asume que serán pocas; los modelos nuevos dentro de
+   una familia no tocan nada), y los adaptadores leen atributos del
+   integrador (`neurons`, `n_sim`, `noise`) por convención, sin contrato
+   formal. Alternativa futura: que el integrador declare qué señal necesita.
 2. **`model_type` como string.** Tres valores literales repetidos en
    `Backend`, integradores y `NDResult`. ¿Enum o constante?
 3. **Contrato del `Integrator`.** ¿Convertirlo en clase abstracta (`abc`) con
@@ -553,7 +589,10 @@ antes de mover piezas:
 ## 12. Reglas de trabajo para agentes
 
 - **No hacer commit ni push sin que se pida.** Antes de acciones difíciles de
-  revertir, confirmar.
+  revertir, confirmar. El autor commitea con `git aicommit` (script propio en
+  `/usr/local/bin/git-aicommit` que genera el mensaje con Claude a partir de
+  lo que está *staged*; con `-a` hace `git add` de todo, sin `-a` solo
+  commitea lo ya staged) y hace el push él mismo o lo pide explícitamente.
 - **Antes de borrar o renombrar algo público, buscar usos con el `grep`
   real.** En algunos entornos `grep` es un wrapper que respeta `.gitignore` y
   puede devolver vacío en falso; usar `command grep -rn ... --exclude-dir=.git`
@@ -575,7 +614,7 @@ antes de mover piezas:
 
 - Paper: Paredes, R., Cabral, J. B., & Seriès, P. (2025). *Scikit-NeuroMSI: A
   Generalized Framework for Modeling Multisensory Integration.*
-  Neuroinformatics, 23:40. En `draft/s12021-025-09738-1.pdf`. Secciones útiles:
+  Neuroinformatics, 23:40. En `draft/s12021-025-09738-1.pdf` (versionado). Secciones útiles:
   *Availability and Future Directions* (p. 12), Apéndice A (estandarización
   formal), B (clases), C (modelos), D (lecturas de causas).
 - Modelos: Alais & Burr (2004); Körding et al. (2007); Cuppini et al. (2017).
