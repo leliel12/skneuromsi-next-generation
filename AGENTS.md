@@ -115,8 +115,8 @@ Pendiente / no portado (existe en el paquete original, no acá):
  Stimulus (Visual/Audio)                       Integrator
   "qué pasó en el mundo"                        "cómo lo procesa un modelo"
         │                                             ▲
-        │ generate_signal(backend)                    │ execute(signals, **grids)
-        │   (dispatcher por model_type)               │   └─ integrate(...)
+        │ generate_neural_signal(...)                 │ execute(signals, **grids)
+        │ generate_unisensory_signal(...)             │   └─ integrate(...)
         ▼                                             │
    NeuralSignal / UnisensorySignal  ──── Backend ─────┘
    (contrato, inmutable, validado)    _generate_signals()
@@ -129,10 +129,11 @@ Paso a paso de `Backend.run()` ([backend.py](neuromsi/backend.py)):
 
 1. `integrator.check_stimuli_compatible(modalities)` — falla temprano si las
    modalidades no son las que el modelo espera.
-2. `_generate_signals()` — le pide a cada estímulo `stim.generate_signal(self)`
-   pasándole el propio `Backend`. El `Backend` no sabe cómo se construye una
-   señal: el estímulo lee de él `integrator`, `time_range`, `time_res` y
-   `random`, y despacha por `integrator.model_type` (ver tabla abajo).
+2. `_generate_signals()` — despacha por `integrator.model_type` con la tabla
+   de clase `Backend._SIGNAL_ENCODERS` (`model_type` → adaptador). El adaptador
+   (`_neural_signal` o `_statistical_signal`) junta del integrador y de la corrida
+   los argumentos y llama al codificador **público** del estímulo, que no
+   conoce al `Backend` ni al integrador (ver tabla abajo).
 3. `integrator.execute(signals, time_range, time_res, position_range,
    position_res, random)` — valida las señales y delega en
    `integrator.integrate(...)`, que devuelve `(response, extra)`.
@@ -144,24 +145,24 @@ Paso a paso de `Backend.run()` ([backend.py](neuromsi/backend.py)):
 
 ### 3.1 `model_type` decide la codificación
 
-El `Backend` **no conoce** los modelos concretos ni los tipos de señal: lee el
-atributo de clase `model_type` del integrador. El estímulo, que recibe el
-`Backend` completo, lo lee de `backend.integrator.model_type`, así el tipo de
-modelo y los parámetros de la señal salen siempre del mismo lugar. El
-dispatcher `Stimulus.generate_signal` elige el codificador con la tabla de
-clase `Stimulus._SIGNAL_ENCODERS` (`model_type` → nombre de método).
+El `Backend` **no conoce** los modelos concretos: lee el atributo de clase
+`model_type` del integrador y elige el adaptador con la tabla
+`Backend._SIGNAL_ENCODERS`. Conoce, en cambio, los dos codificadores públicos
+del estímulo (cada adaptador llama a uno). El cableado (qué parámetros del
+integrador necesita cada familia) vive en el `Backend`; `Stimulus` recibe
+argumentos explícitos y queda independiente del `Backend`.
 
 | `model_type` | Señal | Productor en `Stimulus` | Modelos |
 |---|---|---|---|
-| `"Neural"` | `NeuralSignal` (`values`: matriz `(tiempo, neuronas)`) | `_generate_neural_signal` (lee `backend.integrator.neurons`, `backend.time_range[1]`, `backend.time_res`) | `Cuppini2017` |
-| `"Bayesian"` | `UnisensorySignal` (`values`: `{"var", "input"}`) | `_generate_unisensory_signal` (lee `backend.integrator.n_sim` y `.noise`, con defaults 1 y `False`, y `backend.random`) | `Kording2007` |
+| `"Neural"` | `NeuralSignal` (`values`: matriz `(tiempo, neuronas)`) | `generate_neural_signal(neurons, simulation_length, time_res)`; adaptador `Backend._neural_signal` (lee `integrator.neurons`, `time_range[1]`, `time_res`) | `Cuppini2017` |
+| `"Bayesian"` | `UnisensorySignal` (`values`: `{"var", "input"}`) | `generate_unisensory_signal(n, noise, random)`; adaptador `Backend._statistical_signal` (lee `integrator.n_sim` y `integrator.noise`, con defaults 1 y `False`, y `Backend.random`) | `Kording2007` |
 | `"MLE"` | `UnisensorySignal` (ídem) | ídem | `AlaisBurr2004` |
 
-Un `model_type` desconocido lanza `ValueError` en `Stimulus.generate_signal`.
-Todos los codificadores reciben el `Backend` y toman de él lo que
-necesitan. (Consecuencia: `Stimulus` queda acoplado a esos atributos del
-`Backend`: `integrator`, `time_range`, `time_res` y `random`.) **Para soportar un tipo de modelo nuevo:** escribir su codificador
-en `Stimulus` y registrarlo en `_SIGNAL_ENCODERS`; el `Backend` no cambia.
+Un `model_type` desconocido lanza `ValueError` en
+`Backend._generate_signals`. **Para soportar una familia de modelos nueva:**
+escribir su codificador público en `Stimulus`, un adaptador en `Backend` y
+registrarlo en `_SIGNAL_ENCODERS` (dos archivos). Agregar un modelo *dentro* de
+una familia existente no toca ninguno de los dos.
 
 `NDResult.mtype` guarda ese `model_type` como string (no se valida contra una
 lista).
@@ -224,9 +225,10 @@ Audio(position, *, intensity=28, sigma=32, onset=0, duration=100, **kwargs)
 - `duration=None` ⇒ dura toda la simulación.
 - `stim_n` repeticiones separadas por `soa` (onset a onset; el hueco real es
   `soa - duration`).
-- API pública de codificación: `generate_signal(backend)`, un dispatcher. Todo lo demás es privado:
-  los codificadores `_generate_neural_signal` y
-  `_generate_unisensory_signal`,
+- API pública de codificación: `generate_neural_signal(neurons,
+  simulation_length, time_res)` y `generate_unisensory_signal(n, noise,
+  random)`, con argumentos explícitos (el estímulo no conoce al `Backend`).
+  Todo lo demás es privado:
   `_calculate_stimuli_input` (gaussiana espacial), `_create_unimodal_stimuli_matrix`
   (línea de tiempo), `_draw_measurement` (medición para modelos estadísticos).
 - `_draw_measurement`: con `noise=False` devuelve la **posición verdadera**
@@ -293,8 +295,9 @@ Backend(stimuli, integrator, *, seed=None, time_range=(0, 100), time_res=0.01,
   esa cantidad de posiciones. Los modelos sin neuronas se saltan el chequeo.
 - Los parámetros `causes_*` son del **Backend** (política de lectura), no del
   integrador.
-- Métodos: `_check_position_range`, `_generate_signals` (delega en
-  `Stimulus.generate_signal`), `_make_ndresult`,
+- Métodos: `_check_position_range`, `_neural_signal` y `_statistical_signal`
+  (adaptadores por familia), `_generate_signals` (despacha con
+  `_SIGNAL_ENCODERS`), `_make_ndresult`,
   `_calculate_causes` (privados, van primero) y `run` (público, va al final).
 
 ---
@@ -509,13 +512,17 @@ builtins), `check-manifest`, `coverage`, `pydocstyle`.
 Preguntas de diseño que el código actual no resuelve; conviene decidirlas
 antes de mover piezas:
 
-1. **¿Dónde vive la codificación?** *Resuelta en parte.* El `Backend` ya no
-   tiene el `if model_type`: llama a `Stimulus.generate_signal(self)`, un
-   dispatcher con una tabla (`_SIGNAL_ENCODERS`). Quedan dos
-   costos: agregar un tipo de modelo todavía exige tocar `Stimulus` (el
-   codificador y la tabla), y los codificadores leen atributos del
-   `Backend` y del integrador (`neurons`, `n_sim`, `noise`) por convención,
-   sin contrato formal. Alternativa futura: que el integrador declare qué señal necesita.
+1. **¿Dónde vive la codificación?** *Resuelta en parte.* El despacho por
+   `model_type` vive en el `Backend` como una tabla (`_SIGNAL_ENCODERS`) y no
+   como un `if`; `Stimulus` expone codificadores con argumentos explícitos y
+   no depende del `Backend`. (Se probó antes que el dispatcher viviera en
+   `Stimulus` con `generate_signal(backend)`; se descartó porque acoplaba el
+   estímulo al `Backend`.) Quedan dos
+   costos: agregar una *familia* de modelos exige tocar `Stimulus` y `Backend`
+   (se asume que serán pocas; los modelos nuevos dentro de una familia no
+   tocan nada), y los adaptadores leen atributos del integrador (`neurons`,
+   `n_sim`, `noise`) por convención, sin contrato formal. Alternativa futura:
+   que el integrador declare qué señal necesita.
 2. **`model_type` como string.** Tres valores literales repetidos en
    `Backend`, integradores y `NDResult`. ¿Enum o constante?
 3. **Contrato del `Integrator`.** ¿Convertirlo en clase abstracta (`abc`) con

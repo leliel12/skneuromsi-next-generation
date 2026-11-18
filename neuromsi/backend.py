@@ -33,6 +33,16 @@ class Backend:
     >>> result = backend.run()
     """
 
+    #: Which adapter encodes the stimuli of each ``model_type`` (see
+    #: ``_generate_signals``). Neural models consume a time-by-neuron
+    #: drive; statistical models (Bayesian and MLE) consume a measurement
+    #: and its variance.
+    _SIGNAL_ENCODERS = {
+        "Neural": "_neural_signal",
+        "Bayesian": "_statistical_signal",
+        "MLE": "_statistical_signal",
+    }
+
     def __init__(
         self,
         stimuli,
@@ -121,14 +131,65 @@ class Backend:
                 f"Set position_range=(0, {neurons * self.position_res})"
             )
 
+    def _neural_signal(self, stim):
+        """
+        Encodes a stimulus as the drive of a neural model.
+
+        Takes from the run what the neural encoder needs: the number of
+        neurons of the integrator and the time grid. The random generator
+        is not used, since the noise of a neural model is added by the
+        integrator.
+
+        Parameters
+        ----------
+        stim : Stimulus
+            The stimulus to encode.
+
+        Returns
+        -------
+        NeuralSignal
+            A time-by-neuron matrix for the modality of the stimulus.
+        """
+        return stim.generate_neural_signal(
+            neurons=self.integrator.neurons,
+            simulation_length=self.time_range[1],
+            time_res=self.time_res,
+        )
+
+    def _statistical_signal(self, stim):
+        """
+        Encodes a stimulus as the measurement of a statistical model.
+
+        Takes from the integrator the number of simulations (``n_sim``,
+        1 if it has none, since MLE models may not simulate observers)
+        and whether it is noisy (``noise``, False if it has no such
+        attribute), and from the run the random generator.
+
+        Parameters
+        ----------
+        stim : Stimulus
+            The stimulus to encode.
+
+        Returns
+        -------
+        UnisensorySignal
+            The variance of the stimulus and the measurement drawn from it.
+        """
+        return stim.generate_unisensory_signal(
+            n=getattr(self.integrator, "n_sim", 1),
+            noise=getattr(self.integrator, "noise", False),
+            random=self.random,
+        )
+
     def _generate_signals(self):
         """
         Encodes every stimulus as the signal its model consumes.
 
-        The Backend does not know how a signal is built: it hands itself
-        to each stimulus, which reads from it the integrator and the
-        context of the run and decides the encoding (see
-        :meth:`Stimulus.generate_signal`).
+        The ``model_type`` of the integrator picks the encoder from
+        ``_SIGNAL_ENCODERS``; each encoder gathers the arguments that its
+        kind of stimulus signal needs. To support a new family of models,
+        write its stimulus encoder (in :class:`Stimulus`), an adapter here
+        and register it in the table.
 
         Returns
         -------
@@ -141,9 +202,19 @@ class Backend:
             If the model does not declare a known ``model_type``.
 
         """
+        model_type = getattr(self.integrator, "model_type", None)
+        encoder_name = self._SIGNAL_ENCODERS.get(model_type)
+        if encoder_name is None:
+            known = ", ".join(repr(k) for k in self._SIGNAL_ENCODERS)
+            raise ValueError(
+                f"Unknown model_type {model_type!r}. Expected one of "
+                f"{known}."
+            )
+        encoder = getattr(self, encoder_name)
+
         signals = {}
         for stim in self.stimuli:
-            signals[stim.modality] = stim.generate_signal(self)
+            signals[stim.modality] = encoder(stim)
         return signals
 
     def _make_ndresult(self, response, extra, stimuli):
